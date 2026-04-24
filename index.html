@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NIKKE 红球箱子策略模拟器</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Static Web App</p>
+        <h1>NIKKE 红球箱子策略模拟器</h1>
+        <p class="hero-text">
+          适合直接挂载到 GitHub Pages 的静态网页版本。所有输入、策略对比、图表和明细都在同一页里，从上到下顺着操作。
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button id="run-btn" class="primary-btn">重新计算</button>
+        <button id="export-csv-btn" class="ghost-btn">导出当前明细 CSV</button>
+        <button id="export-png-btn" class="ghost-btn">导出图表 PNG</button>
+      </div>
+    </header>
+
+    <section class="status-strip">
+      <div class="status-pill">
+        <span class="status-label">状态</span>
+        <strong id="status-text">等待计算</strong>
+      </div>
+      <div class="status-pill">
+        <span class="status-label">固定规则</span>
+        <strong>首个大档 381 / 间隔 20</strong>
+      </div>
+      <div class="status-pill">
+        <span class="status-label">每日小时数</span>
+        <strong>自动按 24 + 扫荡计算</strong>
+      </div>
+    </section>
+
+    <section class="metrics-grid" id="metrics-grid"></section>
+
+    <main class="sections">
+      <section class="section-card collapsible is-open" data-section="params">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">基础参数</span>
+            <span class="section-desc">每日小时数按基础 24 小时 + 免费扫荡 + 购买扫荡自动计算。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div id="params-form" class="form-grid"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="mainlines">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">主线更新</span>
+            <span class="section-desc">用时间轴卡片记录主线推进、小时加成和 102 门槛。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="section-toolbar">
+            <button data-add="mainlines" class="small-btn" type="button">新增主线更新</button>
+          </div>
+          <div id="mainlines-list" class="timeline-list"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="events">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">活动</span>
+            <span class="section-desc">活动改成更清晰的事件卡片，便于快速改天数和箱子数。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="section-toolbar">
+            <button data-add="events" class="small-btn" type="button">新增活动</button>
+          </div>
+          <div id="events-list" class="timeline-list"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="extras">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">额外来源 / 日常获取</span>
+            <span class="section-desc">支持每日、每周、每月和一次性来源。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="section-toolbar">
+            <button data-add="extras" class="small-btn" type="button">新增来源</button>
+          </div>
+          <div id="extras-list" class="editor-list"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="strategies">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">策略</span>
+            <span class="section-desc">开启的策略会参与模拟和图表对比。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="section-toolbar">
+            <button data-add="strategies" class="small-btn" type="button">新增策略</button>
+          </div>
+          <div id="strategies-list" class="editor-list"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="compare">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">策略对比</span>
+            <span class="section-desc">先选基础策略，再逐个加入对比策略。图表会跟随鼠标显示当前天数下各策略数值。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="compare-bar">
+            <label class="field">
+              <span>基础策略</span>
+              <select id="baseline-select"></select>
+            </label>
+            <label class="field">
+              <span>待加入对比策略</span>
+              <select id="compare-candidate-select"></select>
+            </label>
+            <label class="field">
+              <span>每日明细策略</span>
+              <select id="detail-strategy-select"></select>
+            </label>
+            <button id="add-compare-btn" class="primary-btn" type="button">增加对比策略</button>
+          </div>
+          <div id="compare-chips" class="chip-row"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="charts">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">策略对比图</span>
+            <span class="section-desc">鼠标移动到图表上时，会实时显示当前天数下各策略的等级值。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div id="line-chart" class="chart-box tall"></div>
+          <div id="bar-chart" class="chart-box"></div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="summary">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">策略汇总</span>
+            <span class="section-desc">按最终等级排序，点击某一行可切换每日明细。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>策略</th>
+                  <th>类型</th>
+                  <th>最终等级</th>
+                  <th>剩余箱子</th>
+                  <th>累计开箱</th>
+                  <th>102 开启日</th>
+                </tr>
+              </thead>
+              <tbody id="summary-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" data-section="detail">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">每日明细</span>
+            <span class="section-desc">当前按“每日明细策略”下拉框中的策略展示。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="table-wrap detail-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>天数</th>
+                  <th>等级</th>
+                  <th>小时量</th>
+                  <th>箱子</th>
+                  <th>当日开箱</th>
+                  <th>日常红球</th>
+                  <th>额外红球</th>
+                  <th>当前门槛</th>
+                  <th>102已开</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody id="detail-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
