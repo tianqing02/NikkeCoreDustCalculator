@@ -20,12 +20,24 @@ const STRATEGY_TYPES = [
   "SMART_VALUE_GATE",
 ];
 
+const ACTIVITY_MODES = {
+  DAILY: "daily",
+  WEEKLY: "weekly",
+  ONCE: "once",
+};
+
+const ACTIVITY_EDITOR_MODES = {
+  CUSTOM: "自定义",
+  PRESET: "预设",
+};
+
 const FIXED_TARGET_102_RATE = 102;
 const FIXED_BASE_DAILY_HOURS = 24;
 const FIXED_FREE_SWEEPS = 1;
 const FIXED_HOURS_PER_SWEEP = 2;
 const FIXED_FIRST_BIG_LEVEL = 381;
 const FIXED_BIG_INTERVAL = 20;
+const DEFAULT_START_DATE = new Date().toISOString().slice(0, 10);
 
 const CORE_DUST_BREAKPOINTS = [
   { nextLevel: 11, cost: 20 },
@@ -56,51 +68,107 @@ const CORE_DUST_RANGES = [
   { from: 801, to: 9999, cost: 20000 },
 ];
 
+function parseDateInput(text) {
+  if (!text) return null;
+  const [year, month, day] = String(text).split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function offsetDateString(baseText, days) {
+  const baseDate = parseDateInput(baseText) ?? new Date();
+  const next = new Date(baseDate);
+  next.setDate(next.getDate() + days);
+  return formatDateInput(next);
+}
+
+function mainlineChapterForIndex(index) {
+  return Number(state.params.currentMainlineChapter || 34) + 2 + index * 2;
+}
+
+function formatMainlineLabel(chapter) {
+  return `主线${chapter}章`;
+}
+
+function defaultMainlineLabel(index) {
+  return formatMainlineLabel(mainlineChapterForIndex(index));
+}
+
+function syncMainlineChaptersByDate() {
+  const sorted = state.mainlines
+    .map((item, index) => ({
+      index,
+      timestamp: parseDateInput(item.date)?.getTime() ?? Date.now() + index * 86400000,
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  sorted.forEach((item, order) => {
+    state.mainlines[item.index].chapter = mainlineChapterForIndex(order);
+  });
+}
+
 const state = {
   params: {
     startLevel: 378,
     startProgress: 0,
     startHourlyRate: 79,
     startBoxes: 1800,
+    currentMainlineChapter: 34,
     simulateDays: 300,
     paidSweeps: 2,
     bigRateBonus: 1.5,
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: DEFAULT_START_DATE,
   },
   mainlines: [
-    { index: 1, day: 50, rateBonus: 2, gateLevel: null, enabled: true, note: "" },
-    { index: 2, day: 100, rateBonus: 2, gateLevel: null, enabled: true, note: "" },
-    { index: 3, day: 150, rateBonus: 2, gateLevel: 501, enabled: true, note: "" },
-    { index: 4, day: 200, rateBonus: 2, gateLevel: 481, enabled: true, note: "" },
-    { index: 5, day: 250, rateBonus: 2, gateLevel: 441, enabled: true, note: "" },
+    { chapter: 36, date: offsetDateString(DEFAULT_START_DATE, 50), rateBonus: 2, gateLevel: null },
+    { chapter: 38, date: offsetDateString(DEFAULT_START_DATE, 100), rateBonus: 2, gateLevel: null },
+    { chapter: 40, date: offsetDateString(DEFAULT_START_DATE, 150), rateBonus: 2, gateLevel: 501 },
+    { chapter: 42, date: offsetDateString(DEFAULT_START_DATE, 200), rateBonus: 2, gateLevel: 481 },
+    { chapter: 44, date: offsetDateString(DEFAULT_START_DATE, 250), rateBonus: 2, gateLevel: 441 },
   ],
-  events: [
-    { name: "活动1", day: 14, boxes: 300, enabled: true, note: "" },
-    { name: "活动2", day: 28, boxes: 300, enabled: true, note: "" },
-    { name: "活动3", day: 42, boxes: 300, enabled: true, note: "" },
-  ],
+  events: [],
+  activityConfig: {
+    mode: ACTIVITY_EDITOR_MODES.PRESET,
+  },
   extras: [
-    { name: "每日补充", startDay: 0, endDay: 300, frequency: "每日", amount: 0, enabled: true, note: "" },
-    { name: "每周补充", startDay: 0, endDay: 300, frequency: "每周", amount: 0, enabled: true, note: "" },
-    { name: "每月补充", startDay: 0, endDay: 300, frequency: "每月", amount: 0, enabled: true, note: "" },
+    { name: "每日补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每日", amount: 0, enabled: true, note: "" },
+    { name: "每周补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每周", amount: 0, enabled: true, note: "" },
+    { name: "每月补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每月", amount: 0, enabled: true, note: "" },
   ],
   strategies: [
-    { name: "不开箱基线", type: "BASELINE", targetDay: null, targetLevel: null, enabled: true, note: "" },
-    { name: "现在全开", type: "OPEN_ALL_NOW", targetDay: 0, targetLevel: null, enabled: true, note: "" },
-    { name: "102后开", type: "NO_BOX", targetDay: null, targetLevel: null, enabled: true, note: "" },
-    { name: "第4次冲481", type: "CUSTOM_GATE", targetDay: 200, targetLevel: 481, enabled: true, note: "" },
-    { name: "价值判断按门槛冲", type: "SMART_VALUE_GATE", targetDay: null, targetLevel: null, enabled: true, note: "" },
+    { name: "完全囤箱", type: "BASELINE", targetDay: null, targetLevel: null, enabled: true, note: "全程不开箱，只靠自然获取推进，适合作为最保守基线。" },
+    { name: "立刻全开", type: "OPEN_ALL_NOW", targetDay: 0, targetLevel: null, enabled: true, note: "开局第一天把现有箱子全部打开，用来观察短期爆发收益。" },
+    { name: "102后再开", type: "NO_BOX", targetDay: null, targetLevel: null, enabled: true, note: "先囤箱到 102 门槛解锁后，再统一开箱，适合稳健思路。" },
+    { name: "门槛即开", type: "SMART_GATE", targetDay: null, targetLevel: null, enabled: true, note: "每次遇到主线门槛时，只开到当前门槛需要的量，不额外超开。" },
+    { name: "大关卡分段开", type: "OPEN_EVERY_MILESTONE", targetDay: null, targetLevel: null, enabled: true, note: "遇到大关卡节点再分段释放箱子，兼顾推进与资源留存。" },
+    { name: "价值判断开箱", type: "SMART_VALUE_GATE", targetDay: null, targetLevel: null, enabled: true, note: "在门槛节点按未来收益和当前成本判断，划算时才开箱。" },
   ],
   results: {},
   summaries: [],
   detailStrategy: "",
+  mainlineEditorIndex: 0,
+  mainlineModalOpen: false,
+  mainlinePopupPosition: { x: 0, y: 0 },
 };
 
+const mainlineTimelineChart = echarts.init(document.getElementById("mainline-timeline-chart"));
 const lineChart = echarts.init(document.getElementById("line-chart"));
 const barChart = echarts.init(document.getElementById("bar-chart"));
 const statusText = document.getElementById("status-text");
 const detailStrategySelect = document.getElementById("detail-strategy-select");
 const pageNavList = document.getElementById("page-nav-list");
+const mainlineEditorHost = document.getElementById("mainline-editor");
+const mainlineModalRoot = document.createElement("div");
+mainlineModalRoot.className = "mainline-modal";
+document.body.appendChild(mainlineModalRoot);
 
 function dailyHours() {
   return FIXED_BASE_DAILY_HOURS + (FIXED_FREE_SWEEPS + state.params.paidSweeps) * FIXED_HOURS_PER_SWEEP;
@@ -121,11 +189,104 @@ function normalizeFrequency(value) {
   if (text === "每周" || lowered === "weekly") return "每周";
   if (text === "每月" || lowered === "monthly") return "每月";
   if (text === "一次性" || lowered === "once" || lowered === "one-time") return "一次性";
-  if (text.includes("日")) return "每日";
-  if (text.includes("周")) return "每周";
-  if (text.includes("月")) return "每月";
-  if (text.includes("一次") || lowered.includes("one")) return "一次性";
   return text;
+}
+
+function dayToDate(day) {
+  const base = parseDateInput(state.params.startDate) ?? new Date();
+  base.setDate(base.getDate() + day);
+  return base;
+}
+
+function dateToDay(dateText) {
+  const start = parseDateInput(state.params.startDate);
+  const target = parseDateInput(dateText);
+  if (!start || !target) return null;
+  return Math.floor((target.getTime() - start.getTime()) / 86400000);
+}
+
+function addMonthsClamped(date, months) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  const targetMonth = month + months;
+  const first = new Date(year, targetMonth, 1);
+  const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+  return new Date(first.getFullYear(), first.getMonth(), Math.min(day, lastDay));
+}
+
+function isExtraTriggered(extra, day) {
+  const frequency = normalizeFrequency(extra.frequency);
+  const startDay = extra.startDate ? (dateToDay(extra.startDate) ?? extra.startDay) : extra.startDay;
+  if (day < startDay) return false;
+  if (frequency !== "一次性" && day > extra.endDay) return false;
+  if (frequency === "每日") return true;
+  if (frequency === "每周") return (day - startDay) % 7 === 0;
+  if (frequency === "每月") {
+    const current = dayToDate(day);
+    const anchor = dayToDate(startDay);
+    let cursor = new Date(anchor);
+    while (cursor <= current) {
+      if (
+        cursor.getFullYear() === current.getFullYear() &&
+        cursor.getMonth() === current.getMonth() &&
+        cursor.getDate() === current.getDate()
+      ) return true;
+      const passedMonths = (cursor.getFullYear() - anchor.getFullYear()) * 12 + cursor.getMonth() - anchor.getMonth() + 1;
+      cursor = addMonthsClamped(anchor, passedMonths);
+    }
+    return false;
+  }
+  if (frequency === "一次性") return day === startDay;
+  return false;
+}
+
+function isActivityTriggered(activity, day) {
+  const startDay = dateToDay(activity.startDate);
+  if (startDay == null || day < startDay) return false;
+  const durationDays = Math.max(1, Number(activity.durationDays || 1));
+  const endDayExclusive = startDay + durationDays;
+  if (day >= endDayExclusive) return false;
+  if (activity.mode === ACTIVITY_MODES.DAILY) return true;
+  if (activity.mode === ACTIVITY_MODES.WEEKLY) return (day - startDay) % 7 === 0;
+  return day === startDay;
+}
+
+function buildPresetActivities() {
+  const results = [];
+  const totalDays = Math.max(0, Number(state.params.simulateDays || 0));
+  const startDate = state.params.startDate;
+  const largeStep = 42;
+  const smallStep = 28;
+
+  for (let day = 0; day <= totalDays; day += largeStep) {
+    results.push({
+      name: "21天大活动",
+      mode: ACTIVITY_MODES.ONCE,
+      startDate: offsetDateString(startDate, day),
+      durationDays: 21,
+      boxes: 472,
+      locked: false,
+    });
+
+  }
+
+  for (let day = 0; day <= totalDays; day += smallStep) {
+    results.push({
+      name: "14天小活动",
+      mode: ACTIVITY_MODES.ONCE,
+      startDate: offsetDateString(startDate, day),
+      durationDays: 14,
+      boxes: 324,
+      locked: false,
+    });
+  }
+
+  return results;
+}
+
+function effectiveEvents() {
+  return state.activityConfig.mode === ACTIVITY_EDITOR_MODES.PRESET ? buildPresetActivities() : state.events;
 }
 
 function getCoreDustCostForNextLevel(currentLevel) {
@@ -144,48 +305,6 @@ function milestoneCount(level) {
 function computeBaseHourlyRate(level, mainlineBonus, unlocked102) {
   const baseRate = state.params.startHourlyRate + mainlineBonus + milestoneCount(level) * state.params.bigRateBonus;
   return unlocked102 ? Math.max(baseRate, FIXED_TARGET_102_RATE) : baseRate;
-}
-
-function dayToDate(day) {
-  const base = new Date(`${state.params.startDate}T00:00:00`);
-  base.setDate(base.getDate() + day);
-  return base;
-}
-
-function addMonthsClamped(date, months) {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const day = date.getDate();
-  const targetMonth = month + months;
-  const first = new Date(year, targetMonth, 1);
-  const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-  return new Date(first.getFullYear(), first.getMonth(), Math.min(day, lastDay));
-}
-
-function isExtraTriggered(extra, day) {
-  const frequency = normalizeFrequency(extra.frequency);
-  if (day < extra.startDay) return false;
-  if (frequency !== "一次性" && day > extra.endDay) return false;
-  if (frequency === "每日") return true;
-  if (frequency === "每周") return (day - extra.startDay) % 7 === 0;
-  if (frequency === "每月") {
-    const current = dayToDate(day);
-    const anchor = dayToDate(extra.startDay);
-    let cursor = new Date(anchor);
-    while (cursor <= current) {
-      if (
-        cursor.getFullYear() === current.getFullYear() &&
-        cursor.getMonth() === current.getMonth() &&
-        cursor.getDate() === current.getDate()
-      ) {
-        return true;
-      }
-      cursor = addMonthsClamped(anchor, (cursor.getFullYear() - anchor.getFullYear()) * 12 + cursor.getMonth() - anchor.getMonth() + 1);
-    }
-    return false;
-  }
-  if (frequency === "一次性") return day === extra.startDay;
-  return false;
 }
 
 function normalizeLevelProgress(level, progress) {
@@ -246,7 +365,7 @@ function findActiveGateLevel(mainlinesSeen) {
 }
 
 function shouldOpenFor102ByValue(currentDay, currentHourlyRate, boxesNeeded, currentGateLevel, futureGateDays) {
-  if (currentGateLevel == null) return { shouldOpen: false, note: "当前无有效 102 门槛" };
+  if (currentGateLevel == null) return { shouldOpen: false, note: "当前没有有效的102门槛" };
   if (boxesNeeded <= 0) return { shouldOpen: true, note: "无需开箱即可达到门槛" };
   const nextGateDay = futureGateDays.find((day) => day > currentDay) ?? state.params.simulateDays;
   const advanceDays = Math.max(0, nextGateDay - currentDay);
@@ -275,19 +394,18 @@ function simulate(strategy) {
   let unlockDay = null;
 
   const mainlineByDay = new Map();
-  state.mainlines.filter((item) => item.enabled).forEach((update) => {
-    if (!mainlineByDay.has(update.day)) mainlineByDay.set(update.day, []);
-    mainlineByDay.get(update.day).push(update);
+  state.mainlines.forEach((update) => {
+    const day = dateToDay(update.date);
+    if (day == null) return;
+    if (!mainlineByDay.has(day)) mainlineByDay.set(day, []);
+    mainlineByDay.get(day).push({ ...update, day });
   });
 
-  const eventsByDay = new Map();
-  state.events.filter((item) => item.enabled).forEach((event) => {
-    if (!eventsByDay.has(event.day)) eventsByDay.set(event.day, []);
-    eventsByDay.get(event.day).push(event);
-  });
-
-  const activeExtras = state.extras.filter((item) => item.enabled);
-  const futureGateDays = state.mainlines.filter((item) => item.enabled && item.gateLevel != null).map((item) => item.day);
+  const activeExtras = state.extras;
+  const futureGateDays = state.mainlines
+    .map((item) => ({ gateLevel: item.gateLevel, day: dateToDay(item.date) }))
+    .filter((item) => item.gateLevel != null && item.day != null)
+    .map((item) => item.day);
   const seenUpdates = [];
 
   ({ level, progress: progressDust } = normalizeLevelProgress(level, progressDust));
@@ -297,7 +415,9 @@ function simulate(strategy) {
     let openedBoxesToday = 0;
     let dustFromBoxesToday = 0;
 
-    const activityBoxes = (eventsByDay.get(day) || []).reduce((sum, event) => sum + Number(event.boxes || 0), 0);
+    const activityBoxes = effectiveEvents().reduce((sum, event) => {
+      return sum + (isActivityTriggered(event, day) ? Number(event.boxes || 0) : 0);
+    }, 0);
     boxes += activityBoxes;
 
     (mainlineByDay.get(day) || []).forEach((update) => {
@@ -316,7 +436,7 @@ function simulate(strategy) {
       boxes = result.boxes;
       openedBoxesToday += result.actual;
       dustFromBoxesToday += result.gainedDust;
-      strategyNote = "第0天全开";
+      strategyNote = "首日全开";
     } else if (strategy.type === "CUSTOM_GATE" && strategy.targetDay === day && strategy.targetLevel) {
       const needBoxes = boxesNeededForTargetLevel(strategy.targetLevel, level, progressDust, currentBoxRate);
       if (needBoxes > 0 && needBoxes <= boxes) {
@@ -435,10 +555,11 @@ function renderParams() {
   const host = document.getElementById("params-form");
   host.innerHTML = "";
   const fields = [
-    ["初始等级", "startLevel", "int"],
+    ["当前等级", "startLevel", "int"],
     ["当前级内进度", "startProgress", "float"],
     ["当前小时芯尘", "startHourlyRate", "float"],
     ["拥有芯尘箱（小时）", "startBoxes", "float"],
+    ["当前主线章节", "currentMainlineChapter", "int"],
     ["开始日期", "startDate", "date"],
     ["模拟天数", "simulateDays", "int"],
     ["购买扫荡次数", "paidSweeps", "int"],
@@ -450,15 +571,18 @@ function renderParams() {
     field.innerHTML = `<span>${label}</span>`;
     const input = document.createElement("input");
     input.type = kind === "date" ? "date" : "number";
-    if (kind === "float") input.step = "0.1";
+    if (kind === "float") input.step = "0.5";
     if (kind === "int") input.step = "1";
     input.value = state.params[key];
     input.addEventListener("input", (event) => {
       const raw = event.target.value || 0;
       state.params[key] = kind === "date" ? String(raw) : kind === "int" ? Math.trunc(Number(raw || 0)) : Number(raw || 0);
-      renderParams();
-      renderMetrics();
-      renderDustReference();
+      const dailyHoursLabel = document.getElementById("daily-hours-label");
+      if (dailyHoursLabel) dailyHoursLabel.textContent = `${dailyHours().toFixed(1)} 灏忔椂`;
+      const disabledInputs = host.querySelectorAll('input[disabled]');
+      if (disabledInputs[0]) disabledInputs[0].value = dailyHours().toFixed(1);
+      if (disabledInputs[1]) disabledInputs[1].value = getCoreDustCostForNextLevel(state.params.startLevel);
+      if (key === "startDate" || key === "currentMainlineChapter") renderMainlineTimeline();
     });
     field.appendChild(input);
     host.appendChild(field);
@@ -480,7 +604,6 @@ function renderParams() {
 function renderDustReference() {
   const rangeBody = document.getElementById("dust-range-body");
   rangeBody.innerHTML = "";
-
   CORE_DUST_RANGES.forEach((row) => {
     const label = row.to >= 9999 ? `${row.from}+` : `${row.from}-${row.to}`;
     const tr = document.createElement("tr");
@@ -491,8 +614,8 @@ function renderDustReference() {
 
 function createField(label, value, onChange, options = {}) {
   const wrap = document.createElement("label");
-  wrap.className = `field ${options.long ? "long" : ""} ${options.fullSpan ? "full-span" : ""}`;
-  wrap.innerHTML = `<span>${label}</span>`;
+  wrap.className = `field ${options.long ? "long" : ""} ${options.fullSpan ? "full-span" : ""} ${options.columnClass || ""}`.trim();
+  wrap.innerHTML = `<span class="field-label ${options.hideLabel ? "is-hidden" : ""}">${label}</span>`;
 
   if (options.type === "checkbox") {
     const row = document.createElement("div");
@@ -513,6 +636,7 @@ function createField(label, value, onChange, options = {}) {
   }
 
   const input = options.type === "select" ? document.createElement("select") : document.createElement("input");
+  input.className = `field-control ${options.columnClass || ""}`.trim();
   if (options.type === "select") {
     options.options.forEach((option) => {
       const el = document.createElement("option");
@@ -524,6 +648,7 @@ function createField(label, value, onChange, options = {}) {
   } else {
     input.type = options.type || "text";
     input.value = value ?? "";
+    if (options.step) input.step = options.step;
   }
 
   input.addEventListener(options.type === "select" ? "change" : "input", (event) => {
@@ -536,99 +661,494 @@ function createField(label, value, onChange, options = {}) {
   return wrap;
 }
 
-function renderGenericRows(listId, rows, schema, onDelete) {
+function createCompactField(value, onChange, options = {}) {
+  const input = options.type === "select" ? document.createElement("select") : document.createElement("input");
+  input.className = `timeline-inline-input ${options.compactClass || ""} ${options.columnClass || ""}`.trim();
+
+  if (options.type === "select") {
+    options.options.forEach((option) => {
+      const el = document.createElement("option");
+      el.value = option;
+      el.textContent = option;
+      if (String(option) === String(value ?? "")) el.selected = true;
+      input.appendChild(el);
+    });
+  } else {
+    input.type = options.type || "text";
+    input.value = value ?? "";
+    if (options.placeholder) input.placeholder = options.placeholder;
+    if (options.step) input.step = options.step;
+  }
+
+  if (options.title) input.title = options.title;
+  if (options.ariaLabel) input.setAttribute("aria-label", options.ariaLabel);
+
+  input.addEventListener(options.type === "select" ? "change" : "input", (event) => {
+    const raw = event.target.value;
+    if (options.cast === "number") onChange(Number(raw || 0));
+    else if (options.cast === "optionalInt") onChange(parseOptionalInt(raw));
+    else onChange(raw);
+  });
+
+  return input;
+}
+
+function renderListHeader(host, className, labels, includeAction = true) {
+  const header = document.createElement("div");
+  header.className = `${className} list-header`;
+  labels.forEach((label) => {
+    const cell = document.createElement("div");
+    const config = typeof label === "string" ? { label } : label;
+    cell.className = `list-header-cell ${config.columnClass || ""}`.trim();
+    cell.textContent = config.label;
+    header.appendChild(cell);
+  });
+  if (includeAction) {
+    const actionCell = document.createElement("div");
+    actionCell.className = "list-header-cell list-header-cell-action";
+    actionCell.textContent = "操作";
+    header.appendChild(actionCell);
+  }
+  host.appendChild(header);
+}
+
+function renderGenericRows(listId, rows, schema, onDelete, options = {}) {
   const host = document.getElementById(listId);
   host.innerHTML = "";
+  if (options.showHeader !== false) {
+    renderListHeader(host, `editor-grid ${options.gridClass || ""}`.trim(), schema.map((field) => ({ label: field.label, columnClass: field.columnClass })));
+  }
   rows.forEach((row, index) => {
     const card = document.createElement("div");
     card.className = "editor-row";
     const grid = document.createElement("div");
-    grid.className = "editor-grid";
+    grid.className = `editor-grid ${options.gridClass || ""}`.trim();
     schema.forEach((field) => {
       grid.appendChild(createField(field.label, row[field.key], (value) => { row[field.key] = value; }, field));
     });
-    const del = document.createElement("button");
-    del.className = "icon-btn";
-    del.type = "button";
-    del.textContent = "×";
-    del.addEventListener("click", () => onDelete(index));
-    grid.appendChild(del);
-    card.appendChild(grid);
-    host.appendChild(card);
-  });
-}
-
-function renderTimelineRows(listId, rows, rowType, onDelete) {
-  const host = document.getElementById(listId);
-  host.innerHTML = "";
-  rows.forEach((row, index) => {
-    const card = document.createElement("div");
-    card.className = `timeline-card ${rowType}`;
-
-    const meta = document.createElement("div");
-    meta.className = "timeline-meta";
-    meta.innerHTML = `<div class="timeline-badge">${rowType === "event" ? "活动事件" : `主线 #${row.index}`}</div>`;
-    const del = document.createElement("button");
-    del.className = "icon-btn";
-    del.type = "button";
-    del.textContent = "×";
-    del.addEventListener("click", () => onDelete(index));
-    meta.appendChild(del);
-    card.appendChild(meta);
-
-    const grid = document.createElement("div");
-    grid.className = "timeline-grid";
-    if (rowType === "mainline") {
-      grid.appendChild(createField("序号", row.index, (value) => { row.index = value; }, { type: "number", cast: "number" }));
-      grid.appendChild(createField("天数", row.day, (value) => { row.day = value; }, { type: "number", cast: "number" }));
-      grid.appendChild(createField("小时加成", row.rateBonus, (value) => { row.rateBonus = value; }, { type: "number", cast: "number" }));
-      grid.appendChild(createField("102门槛", row.gateLevel, (value) => { row.gateLevel = value; }, { type: "text", cast: "optionalInt" }));
-      grid.appendChild(createField("启用", row.enabled, (value) => { row.enabled = value; }, { type: "checkbox" }));
-      grid.appendChild(createField("备注", row.note, (value) => { row.note = value; }, { type: "text", long: true }));
-    } else {
-      grid.appendChild(createField("名称", row.name, (value) => { row.name = value; }, { type: "text" }));
-      grid.appendChild(createField("发生天数", row.day, (value) => { row.day = value; }, { type: "number", cast: "number" }));
-      grid.appendChild(createField("获得箱子", row.boxes, (value) => { row.boxes = value; }, { type: "number", cast: "number" }));
-      grid.appendChild(createField("启用", row.enabled, (value) => { row.enabled = value; }, { type: "checkbox" }));
-      grid.appendChild(createField("备注", row.note, (value) => { row.note = value; }, { type: "text", long: true }));
+    if (!row.locked) {
+      const del = document.createElement("button");
+      del.className = "icon-btn";
+      del.type = "button";
+      del.textContent = "x";
+      del.addEventListener("click", () => onDelete(index));
+      grid.appendChild(del);
     }
     card.appendChild(grid);
     host.appendChild(card);
   });
 }
 
-function renderEditors() {
-  renderTimelineRows("mainlines-list", state.mainlines, "mainline", (index) => {
-    state.mainlines.splice(index, 1);
-    renderEditors();
+function ensureMainlineEditorIndex() {
+  if (!state.mainlines.length) {
+    state.mainlineEditorIndex = -1;
+    return;
+  }
+  if (!Number.isInteger(state.mainlineEditorIndex) || state.mainlineEditorIndex < 0 || state.mainlineEditorIndex >= state.mainlines.length) {
+    state.mainlineEditorIndex = 0;
+  }
+}
+
+function sortedMainlineEntries() {
+  syncMainlineChaptersByDate();
+  return state.mainlines
+    .map((item, index) => {
+      const parsedDate = parseDateInput(item.date);
+      return {
+        ...item,
+        index,
+      label: formatMainlineLabel(item.chapter ?? mainlineChapterForIndex(index)),
+        timestamp: parsedDate ? parsedDate.getTime() : Date.now() + index * 86400000,
+      };
+    })
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function renderMainlineEditor() {
+  if (!mainlineEditorHost) return;
+  mainlineEditorHost.innerHTML = "";
+}
+
+function closeMainlineModal() {
+  state.mainlineModalOpen = false;
+  mainlineModalRoot.classList.remove("is-open");
+  mainlineModalRoot.innerHTML = "";
+}
+
+function setMainlinePopupPosition(x, y) {
+  const width = 420;
+  const height = 320;
+  state.mainlinePopupPosition = {
+    x: Math.min(Math.max(window.scrollX + 12, x), window.scrollX + window.innerWidth - width - 12),
+    y: Math.min(Math.max(window.scrollY + 12, y), window.scrollY + window.innerHeight - height - 12),
+  };
+}
+
+function renderMainlineModal() {
+  ensureMainlineEditorIndex();
+  if (!state.mainlineModalOpen || state.mainlineEditorIndex < 0 || !state.mainlines.length) {
+    closeMainlineModal();
+    return;
+  }
+
+  const current = state.mainlines[state.mainlineEditorIndex];
+  const { x, y } = state.mainlinePopupPosition;
+  const currentLabel = formatMainlineLabel(current.chapter ?? mainlineChapterForIndex(state.mainlineEditorIndex));
+
+  mainlineModalRoot.classList.add("is-open");
+  mainlineModalRoot.innerHTML = `
+    <div class="mainline-modal-dialog" role="dialog" aria-modal="false" aria-label="编辑主线节点" style="left:${x}px;top:${y}px;">
+      <div class="mainline-modal-head">
+        <div>
+          <div class="mainline-modal-title">编辑主线节点</div>
+          <div class="mainline-modal-subtitle">${currentLabel}</div>
+        </div>
+        <button class="icon-btn mainline-modal-close" type="button" data-close="modal">x</button>
+      </div>
+      <div class="mainline-modal-grid">
+        <div class="mainline-readonly-chip col-wide">${currentLabel}</div>
+        <label class="field col-date">
+          <span class="field-label">更新时间</span>
+          <input id="mainline-modal-date" class="field-control" type="date" value="${current.date}">
+        </label>
+        <label class="field col-number col-inline-half">
+          <span class="field-label">小时加成</span>
+          <input id="mainline-modal-rate" class="field-control" type="number" step="0.1" value="${current.rateBonus}">
+        </label>
+        <label class="field col-number col-inline-half">
+          <span class="field-label">102门槛</span>
+          <input id="mainline-modal-gate" class="field-control" type="text" value="${current.gateLevel ?? ""}">
+        </label>
+      </div>
+      <div class="mainline-modal-actions">
+        <button class="ghost-btn danger-btn" type="button" id="mainline-modal-delete">删除节点</button>
+        <button class="primary-btn" type="button" id="mainline-modal-done">完成</button>
+      </div>
+    </div>
+  `;
+
+  const bindValue = (id, setter, options = {}) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const { eventName = "input", rerender = true, afterChange } = options;
+    el.addEventListener(eventName, () => {
+      setter(el.value);
+      if (afterChange) afterChange(el.value);
+      if (rerender) renderMainlineTimeline();
+    });
+  };
+
+  bindValue("mainline-modal-date", (value) => {
+    current.date = value || current.date;
+  }, { eventName: "change", rerender: true });
+  bindValue("mainline-modal-rate", (value) => {
+    current.rateBonus = Number(value || 0);
+  }, { eventName: "change", rerender: true });
+  bindValue("mainline-modal-gate", (value) => {
+    current.gateLevel = parseOptionalInt(value);
+  }, { eventName: "change", rerender: true });
+
+  mainlineModalRoot.querySelectorAll('[data-close="modal"]').forEach((node) => {
+    node.addEventListener("click", closeMainlineModal);
   });
-  renderTimelineRows("events-list", state.events, "event", (index) => {
+  document.getElementById("mainline-modal-done")?.addEventListener("click", () => {
+    renderMainlineTimeline();
+    closeMainlineModal();
+  });
+  document.getElementById("mainline-modal-delete")?.addEventListener("click", () => {
+    state.mainlines.splice(state.mainlineEditorIndex, 1);
+    if (state.mainlineEditorIndex >= state.mainlines.length) state.mainlineEditorIndex = state.mainlines.length - 1;
+    renderMainlineTimeline();
+    closeMainlineModal();
+  });
+}
+
+function renderMainlineTimeline() {
+  ensureMainlineEditorIndex();
+  const entries = sortedMainlineEntries();
+
+  if (!entries.length) {
+    mainlineTimelineChart.setOption({
+      title: {
+        text: "暂无主线节点",
+        subtext: "双击时间轴空白处新增主线节点",
+        left: "center",
+        top: "middle",
+        textStyle: { fontSize: 18, fontWeight: 600, color: "#6b778c" },
+        subtextStyle: { fontSize: 13, color: "#7a879b", padding: [10, 0, 0, 0] },
+      },
+      xAxis: { show: false },
+      yAxis: { show: false },
+      series: [],
+      graphic: [],
+    }, true);
+    renderMainlineEditor();
+    renderMainlineModal();
+    return;
+  }
+
+  const firstTs = entries[0].timestamp;
+  const lastTs = entries[entries.length - 1].timestamp;
+  const padding = Math.max(86400000 * 10, Math.floor((lastTs - firstTs || 86400000) * 0.08));
+
+  const lineData = entries.map((item) => [item.timestamp, 0]);
+  const scatterData = entries.map((item) => ({
+    value: [item.timestamp, 0],
+    originalIndex: item.index,
+    symbolSize: 0,
+    itemStyle: {
+      color: "rgba(0,0,0,0)",
+    },
+    label: {
+      show: true,
+      position: "top",
+      distance: 18,
+      formatter: `${item.label}\n${item.date}`,
+      color: "#1f2937",
+      fontSize: 12,
+      lineHeight: 18,
+      align: "center",
+      fontWeight: item.index === state.mainlineEditorIndex ? 700 : 500,
+    },
+  }));
+
+  mainlineTimelineChart.setOption({
+    animation: true,
+    title: {
+      text: `主线更新时间线（起始日 ${state.params.startDate}）`,
+      subtext: "双击空白处新增节点，单击节点编辑，拖动节点修改日期",
+      left: "center",
+      top: 8,
+      textStyle: { fontSize: 18, fontWeight: 700, color: "#1f2937" },
+      subtextStyle: { fontSize: 12, color: "#7a879b", padding: [8, 0, 0, 0] },
+    },
+    grid: { left: 24, right: 24, top: 56, bottom: 36 },
+    tooltip: {
+      trigger: "item",
+      formatter: (params) => {
+        const item = entries.find((entry) => entry.index === params.data.originalIndex);
+        if (!item) return "";
+        return `${item.label}<br>${item.date}<br>小时加成：${item.rateBonus}<br>102门槛：${item.gateLevel ?? "-"}`;
+      },
+    },
+    xAxis: {
+      type: "time",
+      min: firstTs - padding,
+      max: lastTs + padding,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { show: false },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: "value",
+      min: -1,
+      max: 1,
+      show: false,
+    },
+    series: [
+      {
+        type: "line",
+        data: lineData,
+        smooth: false,
+        symbol: "none",
+        lineStyle: { color: "#2F6FED", width: 3 },
+        z: 1,
+      },
+      {
+        type: "scatter",
+        data: scatterData,
+        z: 2,
+      },
+    ],
+  }, true);
+
+  const nodeGraphics = entries.map((item) => {
+    const pixel = mainlineTimelineChart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [item.timestamp, 0]);
+    return {
+      id: `mainline-node-${item.index}`,
+      type: "circle",
+      position: pixel,
+      shape: { r: item.index === state.mainlineEditorIndex ? 10 : 8 },
+      draggable: true,
+      cursor: "move",
+      z: 100,
+      style: {
+        fill: item.index === state.mainlineEditorIndex ? "#D35D3D" : "#2F6FED",
+        stroke: "#ffffff",
+        lineWidth: 2,
+        shadowBlur: 10,
+        shadowColor: "rgba(47,111,237,0.18)",
+      },
+      onclick: () => {
+        state.mainlineEditorIndex = item.index;
+        const rect = mainlineTimelineChart.getDom().getBoundingClientRect();
+        setMainlinePopupPosition(window.scrollX + rect.left + pixel[0] + 14, window.scrollY + rect.top + pixel[1] - 24);
+        state.mainlineModalOpen = true;
+        renderMainlineTimeline();
+      },
+      ondrag: function () {
+        const next = mainlineTimelineChart.convertFromPixel({ xAxisIndex: 0, yAxisIndex: 0 }, this.position);
+        if (!Array.isArray(next) || !next[0]) return;
+        state.mainlines[item.index].date = formatDateInput(new Date(next[0]));
+        state.mainlineEditorIndex = item.index;
+        renderMainlineEditor();
+        if (state.mainlineModalOpen) renderMainlineModal();
+      },
+      ondragend: () => {
+        renderMainlineTimeline();
+      },
+    };
+  });
+
+  mainlineTimelineChart.setOption({ graphic: nodeGraphics });
+  const chartDom = mainlineTimelineChart.getDom();
+  if (chartDom._mainlineDblClickHandler) {
+    chartDom.removeEventListener("dblclick", chartDom._mainlineDblClickHandler);
+  }
+  chartDom._mainlineDblClickHandler = (event) => {
+    const rect = chartDom.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    const clickedNode = entries.some((item) => {
+      const [px, py] = mainlineTimelineChart.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [item.timestamp, 0]);
+      return Math.hypot(px - offsetX, py - offsetY) <= 18;
+    });
+    if (clickedNode) return;
+    const next = mainlineTimelineChart.convertFromPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [offsetX, offsetY]);
+    if (!Array.isArray(next) || !next[0]) return;
+    state.mainlines.push({
+      date: formatDateInput(new Date(next[0])),
+      rateBonus: 2,
+      gateLevel: null,
+    });
+    state.mainlineEditorIndex = state.mainlines.length - 1;
+    setMainlinePopupPosition(window.scrollX + rect.left + offsetX + 14, window.scrollY + rect.top + offsetY - 24);
+    state.mainlineModalOpen = true;
+    renderMainlineTimeline();
+  };
+  chartDom.addEventListener("dblclick", chartDom._mainlineDblClickHandler);
+
+  renderMainlineEditor();
+  renderMainlineModal();
+}
+
+function renderTimelineRows(listId, rows, rowType, onDelete) {
+  const host = document.getElementById(listId);
+  host.innerHTML = "";
+  renderListHeader(host, "timeline-grid", rowType === "mainline" ? ["更新时间", "小时加成", "102门槛"] : ["开始日期", "持续天数", "获得箱子"]);
+  rows.forEach((row, index) => {
+    const card = document.createElement("div");
+    card.className = `timeline-card ${rowType}`;
+
+    const compactGrid = document.createElement("div");
+    compactGrid.className = "timeline-grid";
+    if (rowType === "mainline") {
+      compactGrid.appendChild(createCompactField(row.date, (value) => { row.date = value; }, { type: "date", ariaLabel: "主线更新时间", title: "主线更新时间", compactClass: "is-date", columnClass: "col-date" }));
+      compactGrid.appendChild(createCompactField(row.rateBonus, (value) => { row.rateBonus = value; }, { type: "number", cast: "number", step: "0.1", placeholder: "加成", ariaLabel: "小时加成", title: "小时加成", compactClass: "is-short", columnClass: "col-number" }));
+      compactGrid.appendChild(createCompactField(row.gateLevel, (value) => { row.gateLevel = value; }, { type: "text", cast: "optionalInt", placeholder: "102门槛", ariaLabel: "102门槛", title: "102门槛", compactClass: "is-short", columnClass: "col-gate" }));
+    } else {
+      compactGrid.appendChild(createCompactField(row.startDate, (value) => { row.startDate = value; }, { type: "date", ariaLabel: "活动开始日期", title: "活动开始日期", compactClass: "is-date", columnClass: "col-date" }));
+      compactGrid.appendChild(createCompactField(row.durationDays, (value) => { row.durationDays = value; }, { type: "number", cast: "number", step: "1", placeholder: "天数", ariaLabel: "活动持续天数", title: "活动持续天数", compactClass: "is-short", columnClass: "col-number" }));
+      compactGrid.appendChild(createCompactField(row.boxes, (value) => { row.boxes = value; }, { type: "number", cast: "number", step: "1", placeholder: "箱子", ariaLabel: "活动获得箱子数", title: "活动获得箱子数", compactClass: "is-short", columnClass: "col-number" }));
+    }
+    card.appendChild(compactGrid);
+
+    if (!row.locked) {
+      const compactDel = document.createElement("button");
+      compactDel.className = "icon-btn";
+      compactDel.type = "button";
+      compactDel.textContent = "x";
+      compactDel.addEventListener("click", () => onDelete(index));
+      card.appendChild(compactDel);
+    }
+
+    host.appendChild(card);
+  });
+}
+
+function renderEventsEditor() {
+  const host = document.getElementById("events-list");
+  const toolbar = document.querySelector("#section-events .section-toolbar");
+  if (!host || !toolbar) return;
+
+  toolbar.innerHTML = "";
+  host.innerHTML = "";
+
+  const controls = document.createElement("div");
+  controls.className = "events-mode-bar";
+
+  const modeField = createField("活动模式", state.activityConfig.mode, (value) => {
+    state.activityConfig.mode = value;
+    renderEventsEditor();
+  }, {
+    type: "select",
+    options: [ACTIVITY_EDITOR_MODES.CUSTOM, ACTIVITY_EDITOR_MODES.PRESET],
+    columnClass: "col-frequency",
+  });
+  controls.appendChild(modeField);
+
+  if (state.activityConfig.mode === ACTIVITY_EDITOR_MODES.PRESET) {
+    const note = document.createElement("div");
+    note.className = "events-preset-note";
+    note.textContent = "预设节奏：每 42 天约 1 个 21 天大活动，每 28 天约 1 个 14 天小活动；折算为每 42 天约 1 个大活动 + 1.5 个小活动。";
+    host.appendChild(controls);
+    host.appendChild(note);
+    return;
+  }
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "small-btn";
+  addBtn.textContent = "新增活动";
+  addBtn.addEventListener("click", () => {
+    state.events.push({ name: "新活动", startDate: state.params.startDate, durationDays: 14, boxes: 324, locked: false });
+    renderEventsEditor();
+  });
+  controls.appendChild(addBtn);
+  host.appendChild(controls);
+
+  const list = document.createElement("div");
+  list.id = "events-custom-list";
+  list.className = "editor-list";
+  host.appendChild(list);
+
+  renderGenericRows("events-custom-list", state.events, [
+    { key: "name", label: "名称", type: "text", columnClass: "col-name" },
+    { key: "startDate", label: "开始日期", type: "date", columnClass: "col-date" },
+    { key: "durationDays", label: "持续天数", type: "number", cast: "number", columnClass: "col-day" },
+    { key: "boxes", label: "获得箱子", type: "number", cast: "number", step: "1", columnClass: "col-amount" },
+  ], (index) => {
     state.events.splice(index, 1);
-    renderEditors();
-  });
+    renderEventsEditor();
+  }, { showHeader: false, gridClass: "events-grid" });
+}
+
+function renderEditors() {
+  renderMainlineTimeline();
+  renderEventsEditor();
+
   renderGenericRows("extras-list", state.extras, [
-    { key: "name", label: "名称", type: "text" },
-    { key: "startDay", label: "开始", type: "number", cast: "number" },
-    { key: "endDay", label: "结束", type: "number", cast: "number" },
-    { key: "frequency", label: "类型", type: "select", options: EXTRA_FREQUENCIES },
-    { key: "amount", label: "芯尘", type: "number", cast: "number" },
-    { key: "enabled", label: "启用", type: "checkbox" },
-    { key: "note", label: "备注", type: "text", fullSpan: true },
+    { key: "name", label: "名称", type: "text", columnClass: "col-name" },
+    { key: "startDate", label: "开始日期", type: "date", columnClass: "col-date" },
+    { key: "frequency", label: "类型", type: "select", options: EXTRA_FREQUENCIES, columnClass: "col-frequency" },
+    { key: "amount", label: "芯尘箱", type: "number", cast: "number", step: "0.1", columnClass: "col-amount" },
+    { key: "note", label: "备注", type: "text", columnClass: "col-note" },
   ], (index) => {
     state.extras.splice(index, 1);
     renderEditors();
-  });
+  }, { showHeader: false, gridClass: "extras-grid" });
+
   renderGenericRows("strategies-list", state.strategies, [
-    { key: "name", label: "名称", type: "text" },
-    { key: "type", label: "类型", type: "select", options: STRATEGY_TYPES },
-    { key: "targetDay", label: "目标天", type: "text", cast: "optionalInt" },
-    { key: "targetLevel", label: "目标级", type: "text", cast: "optionalInt" },
-    { key: "enabled", label: "启用", type: "checkbox" },
-    { key: "note", label: "备注", type: "text", fullSpan: true },
+    { key: "name", label: "名称", type: "text", hideLabel: true },
+    { key: "type", label: "类型", type: "select", options: STRATEGY_TYPES, hideLabel: true },
+    { key: "targetDay", label: "目标天", type: "text", cast: "optionalInt", hideLabel: true },
+    { key: "targetLevel", label: "目标级", type: "text", cast: "optionalInt", hideLabel: true },
+    { key: "note", label: "备注", type: "text", hideLabel: true },
   ], (index) => {
     state.strategies.splice(index, 1);
     renderEditors();
-  });
+  }, { gridClass: "strategies-grid" });
 }
 
 function renderMetrics() {
@@ -683,6 +1203,7 @@ function renderCharts() {
   const lineSeries = names.map((name, index) => {
     const rows = state.results[name] || [];
     const unlockDay = rows.at(-1)?.unlockDay;
+    const unlockDate = unlockDay == null ? null : formatDateInput(dayToDate(unlockDay));
     return {
       name,
       type: "line",
@@ -690,12 +1211,12 @@ function renderCharts() {
       showSymbol: false,
       lineStyle: { width: 2.5, color: CHART_COLORS[index % CHART_COLORS.length] },
       itemStyle: { color: CHART_COLORS[index % CHART_COLORS.length] },
-      data: rows.map((row) => [row.day, Number(row.displayLevel.toFixed(4))]),
-      markLine: unlockDay == null ? undefined : {
+      data: rows.map((row) => [formatDateInput(dayToDate(row.day)), Number(row.displayLevel.toFixed(4))]),
+      markLine: unlockDate == null ? undefined : {
         symbol: "none",
         lineStyle: { type: "dashed", color: CHART_COLORS[index % CHART_COLORS.length], width: 1.1, opacity: 0.6 },
-        label: { formatter: `102@${unlockDay}` },
-        data: [{ xAxis: unlockDay }],
+        label: { formatter: `102@${unlockDate}` },
+        data: [{ xAxis: unlockDate }],
       },
     };
   });
@@ -715,7 +1236,7 @@ function renderCharts() {
       borderWidth: 0,
       textStyle: { color: "#ffffff" },
     },
-    xAxis: { type: "value", name: "天数", nameLocation: "middle", nameGap: 30 },
+    xAxis: { type: "time", name: "日期", nameLocation: "middle", nameGap: 30 },
     yAxis: { type: "value", name: "等级" },
     series: lineSeries,
   }, true);
@@ -863,9 +1384,32 @@ function bindCollapsible() {
       section.classList.toggle("is-open");
       const icon = section.querySelector(".collapse-icon");
       icon.textContent = section.classList.contains("is-open") ? "−" : "+";
+      if (section.id === "section-mainlines") setTimeout(() => mainlineTimelineChart.resize(), 0);
       updateActiveNav();
     });
   });
+}
+
+function ensureEventToolbarButtons() {
+  const host = document.querySelector("#section-events .section-toolbar");
+  if (!host) return;
+  host.innerHTML = `
+    <button data-add="event-small" class="small-btn" type="button">新增14天</button>
+    <button data-add="event-large" class="small-btn" type="button">新增21天</button>
+  `;
+}
+
+function syncInlineSectionActions() {
+  ["section-mainlines", "section-events", "section-extras"].forEach((id) => {
+    const section = document.getElementById(id);
+    if (section) section.classList.add("has-inline-toolbar");
+  });
+
+  const mainlineAdd = document.querySelector('[data-add="mainlines"]');
+  if (mainlineAdd) mainlineAdd.textContent = "新增";
+
+  const extrasAdd = document.querySelector('[data-add="extras"]');
+  if (extrasAdd) extrasAdd.textContent = "新增";
 }
 
 function buildPageNav() {
@@ -900,6 +1444,9 @@ function updateActiveNav() {
 }
 
 function bindEvents() {
+  ensureEventToolbarButtons();
+  const mainlineAdd = document.querySelector('[data-add="mainlines"]');
+  if (mainlineAdd) mainlineAdd.closest(".section-toolbar")?.remove();
   document.getElementById("run-btn").addEventListener("click", runSimulation);
   document.getElementById("export-csv-btn").addEventListener("click", exportCurrentCSV);
   document.getElementById("export-png-btn").addEventListener("click", exportChartPNG);
@@ -907,9 +1454,9 @@ function bindEvents() {
   document.querySelectorAll("[data-add]").forEach((button) => {
     button.addEventListener("click", () => {
       const type = button.dataset.add;
-      if (type === "mainlines") state.mainlines.push({ index: state.mainlines.length + 1, day: 0, rateBonus: 2, gateLevel: null, enabled: true, note: "" });
-      if (type === "events") state.events.push({ name: "新活动", day: 0, boxes: 300, enabled: true, note: "" });
-      if (type === "extras") state.extras.push({ name: "新来源", startDay: 0, endDay: state.params.simulateDays, frequency: "每日", amount: 0, enabled: true, note: "" });
+      if (type === "event-small") state.events.push({ name: "14天小活动", mode: ACTIVITY_MODES.ONCE, startDate: state.params.startDate, durationDays: 14, boxes: 324, locked: false });
+      if (type === "event-large") state.events.push({ name: "21天大活动", mode: ACTIVITY_MODES.ONCE, startDate: state.params.startDate, durationDays: 21, boxes: 472, locked: false });
+      if (type === "extras") state.extras.push({ name: "新来源", startDate: state.params.startDate, startDay: 0, endDay: state.params.simulateDays, frequency: "每日", amount: 0, enabled: true, note: "" });
       if (type === "strategies") state.strategies.push({ name: "新策略", type: "BASELINE", targetDay: null, targetLevel: null, enabled: true, note: "" });
       renderEditors();
     });
@@ -922,11 +1469,18 @@ function bindEvents() {
   });
 
   window.addEventListener("resize", () => {
+    mainlineTimelineChart.resize();
     lineChart.resize();
     barChart.resize();
     updateActiveNav();
   });
   window.addEventListener("scroll", updateActiveNav, { passive: true });
+  document.addEventListener("mousedown", (event) => {
+    if (!state.mainlineModalOpen) return;
+    const dialog = mainlineModalRoot.querySelector(".mainline-modal-dialog");
+    if (!dialog) return;
+    if (!dialog.contains(event.target)) closeMainlineModal();
+  });
 }
 
 buildPageNav();

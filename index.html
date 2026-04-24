@@ -56,7 +56,6 @@
         <button class="collapse-toggle" type="button">
           <span class="collapse-copy">
             <span class="section-title">主线更新</span>
-            <span class="section-desc">用时间轴卡片记录主线推进、小时加成和 102 门槛。</span>
           </span>
           <span class="collapse-icon">−</span>
         </button>
@@ -64,7 +63,10 @@
           <div class="section-toolbar">
             <button data-add="mainlines" class="small-btn" type="button">新增主线更新</button>
           </div>
-          <div id="mainlines-list" class="timeline-list"></div>
+          <div class="mainline-panel">
+            <div id="mainline-timeline-chart" class="mainline-chart"></div>
+            <div id="mainline-editor" class="mainline-editor"></div>
+          </div>
         </div>
       </section>
 
@@ -72,7 +74,6 @@
         <button class="collapse-toggle" type="button">
           <span class="collapse-copy">
             <span class="section-title">活动</span>
-            <span class="section-desc">活动使用更清晰的事件卡片，便于快速修改时间和箱子数。</span>
           </span>
           <span class="collapse-icon">−</span>
         </button>
@@ -111,6 +112,54 @@
         <div class="collapse-body">
           <div id="line-chart" class="chart-box tall"></div>
           <div id="bar-chart" class="chart-box"></div>
+          <div class="embedded-summary" hidden>
+            <div class="subsection-head">
+              <h3>策略汇总</h3>
+              <p>按最终等级排序，点击某一行可切换每日明细。</p>
+            </div>
+            <div class="table-wrap sticky-head-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>策略</th>
+                    <th>类型</th>
+                    <th>最终等级</th>
+                    <th>剩余箱子</th>
+                    <th>累计开箱</th>
+                    <th>102 开启日</th>
+                  </tr>
+                </thead>
+                <tbody id="summary-body-old"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card collapsible is-open" id="section-summary" data-nav-label="策略汇总">
+        <button class="collapse-toggle" type="button">
+          <span class="collapse-copy">
+            <span class="section-title">策略汇总</span>
+            <span class="section-desc">按最终等级排序，点击某一行可切换每日明细。</span>
+          </span>
+          <span class="collapse-icon">−</span>
+        </button>
+        <div class="collapse-body">
+          <div class="table-wrap sticky-head-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>策略</th>
+                  <th>类型</th>
+                  <th>最终等级</th>
+                  <th>剩余箱子</th>
+                  <th>累计开箱</th>
+                  <th>102 开启日</th>
+                </tr>
+              </thead>
+              <tbody id="summary-body"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -166,7 +215,7 @@
             <button data-add="strategies" class="small-btn" type="button">新增策略</button>
           </div>
           <div id="strategies-list" class="editor-list"></div>
-          <div class="embedded-summary">
+          <div class="embedded-summary" hidden>
             <div class="subsection-head">
               <h3>策略汇总</h3>
               <p>按最终等级排序，点击某一行可切换每日明细。</p>
@@ -183,7 +232,7 @@
                     <th>102 开启日</th>
                   </tr>
                 </thead>
-                <tbody id="summary-body"></tbody>
+                <tbody id="summary-body-old"></tbody>
               </table>
             </div>
           </div>
