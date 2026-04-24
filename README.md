@@ -28,6 +28,7 @@ https://tianqing02.github.io/NikkeCoreDustCalculator/
 
 - `index.html`：页面结构
 - `styles.css`：页面样式
+- `nikke-data.js`：NIKKE 主线进度与基地等级本地快照
 - `app.js`：模拟逻辑与交互逻辑
 
 ## 本地使用
@@ -38,13 +39,15 @@ https://tianqing02.github.io/NikkeCoreDustCalculator/
 
 ## 部署到 GitHub Pages
 
-1. 将 `index.html`、`styles.css`、`app.js` 提交到仓库。
+1. 将 `index.html`、`styles.css`、`app.js`、`nikke-data.js` 提交到仓库。
 2. 在仓库 `Settings -> Pages` 中选择部署分支。
 3. 如果使用仓库根目录作为发布目录，则入口文件为 `index.html`。
 
 ## 数据来源与鸣谢
 
 部分规则整理与数值校对参考了 NIKKE 相关社区工具与资料。
+
+当前版本会优先尝试读取 `NIKKE Outpost` 的远程章节 / 基地产出数据；若浏览器环境无法直接跨域拉取，则自动回退到仓库内置的 `nikke-data.js` 快照。
 
 感谢：
 
