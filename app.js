@@ -10,14 +10,12 @@ const CHART_COLORS = [
 ];
 
 const EXTRA_FREQUENCIES = ["每日", "每周", "每月", "一次性"];
+const EXTRA_RESOURCE_TYPES = ["芯尘", "芯尘箱"];
 const STRATEGY_TYPES = [
-  "BASELINE",
-  "OPEN_ALL_NOW",
-  "NO_BOX",
-  "CUSTOM_GATE",
-  "SMART_GATE",
-  "OPEN_EVERY_MILESTONE",
-  "SMART_VALUE_GATE",
+  "获得即开",
+  "完全不开",
+  "主线后开",
+  "最后一天全开",
 ];
 
 const ACTIVITY_MODES = {
@@ -34,11 +32,22 @@ const ACTIVITY_EDITOR_MODES = {
 const FIXED_BASE_DAILY_HOURS = 24;
 const FIXED_FREE_SWEEPS = 1;
 const FIXED_HOURS_PER_SWEEP = 2;
-const FIXED_FIRST_BIG_LEVEL = 381;
-const FIXED_BIG_INTERVAL = 20;
-const DEFAULT_START_DATE = new Date().toISOString().slice(0, 10);
+const DEFAULT_START_DATE = formatDateInput(new Date());
 const NIKKE_REMOTE_BASE = "https://nikkeoutpost.netlify.app";
 const FALLBACK_NIKKE_DATA = window.NIKKE_DATA_SNAPSHOT || null;
+const ESTIMATE_RECENT_CHAPTERS = 20;
+const ESTIMATE_FUTURE_CHAPTER_BUFFER = 12;
+const STORAGE_KEY = "nikke-core-dust-calculator-config-v1";
+const PERSISTED_PARAM_KEYS = [
+  "startLevel",
+  "startProgress",
+  "startHourlyRate",
+  "startBoxes",
+  "currentNormalStageId",
+  "currentHardStageId",
+  "simulateDays",
+  "paidSweeps",
+];
 
 const CORE_DUST_BREAKPOINTS = [
   { nextLevel: 11, cost: 20 },
@@ -68,6 +77,15 @@ const CORE_DUST_RANGES = [
   { from: 751, to: 800, cost: 19000 },
   { from: 801, to: 9999, cost: 20000 },
 ];
+
+function defaultStrategies() {
+  return [
+    { name: "获得即开", type: "获得即开", enabled: true, note: "每次拥有箱子时，立刻按当时小时收益全部打开。" },
+    { name: "完全不开", type: "完全不开", enabled: true, note: "全程不主动开箱，只保留箱子库存。" },
+    { name: "主线后开", type: "主线后开", enabled: true, note: "每次普通主线更新并重算基地收益后，按当时小时收益打开库存箱子。" },
+    { name: "最后一天全开", type: "最后一天全开", enabled: true, note: "只在模拟最后一天按当时小时收益打开全部库存箱子。" },
+  ];
+}
 
 function parseDateInput(text) {
   if (!text) return null;
@@ -128,32 +146,27 @@ const state = {
     currentMainlineChapter: 34,
     simulateDays: 300,
     paidSweeps: 2,
-    bigRateBonus: 1.5,
     startDate: DEFAULT_START_DATE,
   },
   mainlines: [
-    { chapter: 36, date: offsetDateString(DEFAULT_START_DATE, 50), rateBonus: 2, gateLevel: null },
-    { chapter: 38, date: offsetDateString(DEFAULT_START_DATE, 100), rateBonus: 2, gateLevel: null },
-    { chapter: 40, date: offsetDateString(DEFAULT_START_DATE, 150), rateBonus: 2, gateLevel: null },
-    { chapter: 42, date: offsetDateString(DEFAULT_START_DATE, 200), rateBonus: 2, gateLevel: null },
-    { chapter: 44, date: offsetDateString(DEFAULT_START_DATE, 250), rateBonus: 2, gateLevel: null },
+    { chapter: 36, date: offsetDateString(DEFAULT_START_DATE, 50) },
+    { chapter: 38, date: offsetDateString(DEFAULT_START_DATE, 100) },
+    { chapter: 40, date: offsetDateString(DEFAULT_START_DATE, 150) },
+    { chapter: 42, date: offsetDateString(DEFAULT_START_DATE, 200) },
+    { chapter: 44, date: offsetDateString(DEFAULT_START_DATE, 250) },
   ],
+  hardlines: [],
   events: [],
   activityConfig: {
     mode: ACTIVITY_EDITOR_MODES.PRESET,
   },
   extras: [
-    { name: "每日补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每日", amount: 0, enabled: true, note: "" },
-    { name: "每周补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每周", amount: 0, enabled: true, note: "" },
-    { name: "每月补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每月", amount: 0, enabled: true, note: "" },
+    { name: "每日补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每日", resourceType: "芯尘", amount: 0, enabled: true, note: "" },
+    { name: "每周补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每周", resourceType: "芯尘", amount: 0, enabled: true, note: "" },
+    { name: "每月补充", startDate: DEFAULT_START_DATE, startDay: 0, endDay: 300, frequency: "每月", resourceType: "芯尘", amount: 0, enabled: true, note: "" },
   ],
   strategies: [
-    { name: "完全囤箱", type: "BASELINE", targetDay: null, targetLevel: null, enabled: true, note: "全程不开箱，只靠自然获取推进，适合作为最保守基线。" },
-    { name: "立刻全开", type: "OPEN_ALL_NOW", targetDay: 0, targetLevel: null, enabled: true, note: "开局第一天把现有箱子全部打开，用来观察短期爆发收益。" },
-    { name: "最后一天全开", type: "NO_BOX", targetDay: null, targetLevel: null, enabled: true, note: "全程囤箱到模拟最后一天再统一开箱，适合观察极限囤箱收益。" },
-    { name: "门槛即开", type: "SMART_GATE", targetDay: null, targetLevel: null, enabled: true, note: "每次遇到主线门槛时，只开到当前门槛需要的量，不额外超开。" },
-    { name: "大关卡分段开", type: "OPEN_EVERY_MILESTONE", targetDay: null, targetLevel: null, enabled: true, note: "遇到大关卡节点再分段释放箱子，兼顾推进与资源留存。" },
-    { name: "价值判断开箱", type: "SMART_VALUE_GATE", targetDay: null, targetLevel: null, enabled: true, note: "在门槛节点按额外收益与开箱成本做启发式判断，划算时才开箱。" },
+    ...defaultStrategies(),
   ],
   results: {},
   summaries: [],
@@ -170,6 +183,83 @@ const state = {
     outpostCoreDustMul: FALLBACK_NIKKE_DATA?.outpostCoreDustMul ?? [null],
   },
 };
+
+function persistedParamsSnapshot() {
+  return PERSISTED_PARAM_KEYS.reduce((result, key) => {
+    result[key] = state.params[key];
+    return result;
+  }, {});
+}
+
+function persistEditableState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      params: persistedParamsSnapshot(),
+      mainlines: state.mainlines,
+      hardlines: state.hardlines,
+      events: state.events,
+      activityConfig: state.activityConfig,
+      extras: state.extras,
+      strategies: state.strategies,
+      detailStrategy: state.detailStrategy,
+    }));
+  } catch (error) {
+    console.warn("保存本地配置失败。", error);
+  }
+}
+
+function restoreEditableState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved?.params && typeof saved.params === "object") {
+      PERSISTED_PARAM_KEYS.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(saved.params, key)) state.params[key] = saved.params[key];
+      });
+    }
+    if (Array.isArray(saved?.mainlines)) state.mainlines = saved.mainlines;
+    if (Array.isArray(saved?.hardlines)) state.hardlines = saved.hardlines;
+    if (Array.isArray(saved?.events)) state.events = saved.events;
+    if (saved?.activityConfig && typeof saved.activityConfig === "object") {
+      state.activityConfig = { ...state.activityConfig, ...saved.activityConfig };
+    }
+    if (Array.isArray(saved?.extras)) state.extras = saved.extras;
+    if (Array.isArray(saved?.strategies)) state.strategies = saved.strategies;
+    if (typeof saved?.detailStrategy === "string") state.detailStrategy = saved.detailStrategy;
+  } catch (error) {
+    console.warn("读取本地配置失败，已使用默认配置。", error);
+  }
+}
+
+restoreEditableState();
+
+function resetDefaultStrategiesIfNeeded() {
+  const defaults = defaultStrategies();
+  if (
+    !Array.isArray(state.strategies) ||
+    !state.strategies.length ||
+    state.strategies.some((strategy) => !STRATEGY_TYPES.includes(strategy.type))
+  ) {
+    state.strategies = defaults;
+    state.detailStrategy = "";
+    persistEditableState();
+    return;
+  }
+
+  let changed = false;
+  defaults.forEach((strategy) => {
+    if (!state.strategies.some((item) => item.type === strategy.type)) {
+      state.strategies.push({ ...strategy });
+      changed = true;
+    }
+  });
+  if (changed) {
+    persistEditableState();
+  }
+}
+
+resetDefaultStrategiesIfNeeded();
 
 const mainlineTimelineChart = echarts.init(document.getElementById("mainline-timeline-chart"));
 const lineChart = echarts.init(document.getElementById("line-chart"));
@@ -255,6 +345,91 @@ function chapterFromStageLabel(label) {
   return match ? Number(match[1]) : null;
 }
 
+function buildChapterStageStats() {
+  const rowsByChapter = new Map();
+  (state.nikkeData.hardProgressOptions || []).forEach((item) => {
+    const chapter = chapterFromStageLabel(item.label);
+    if (chapter == null) return;
+    if (!rowsByChapter.has(chapter)) rowsByChapter.set(chapter, []);
+    rowsByChapter.get(chapter).push(item);
+  });
+
+  const rows = [...rowsByChapter.entries()]
+    .filter(([chapter]) => chapter >= 2)
+    .map(([chapter, stages]) => ({
+      chapter,
+      count: stages.length,
+      lastStageId: String(stages.at(-1)?.id || ""),
+      lastStageLabel: stages.at(-1)?.label || "",
+    }))
+    .sort((a, b) => a.chapter - b.chapter);
+
+  const recent = rows.slice(-ESTIMATE_RECENT_CHAPTERS);
+  const average = recent.length ? recent.reduce((sum, row) => sum + row.count, 0) / recent.length : 0;
+  const estimatedStagesPerChapter = Math.max(1, Math.round(average || 44));
+  const latest = rows.at(-1);
+  const latestStageId = Number(latest?.lastStageId || state.nikkeData.hardProgressOptions?.at(-1)?.id || 0);
+
+  return {
+    rows,
+    recent,
+    latestChapter: latest?.chapter || 0,
+    latestStageId,
+    average,
+    estimatedStagesPerChapter,
+  };
+}
+
+function estimatedChapterFromStageId(stageId, stats = buildChapterStageStats()) {
+  const numericId = Number(stageId || 0);
+  if (!numericId || numericId <= stats.latestStageId || !stats.estimatedStagesPerChapter) return null;
+  return stats.latestChapter + Math.ceil((numericId - stats.latestStageId) / stats.estimatedStagesPerChapter);
+}
+
+function maxProjectedChapter(stats = buildChapterStageStats()) {
+  const mainlineMax = state.mainlines.reduce((max, item) => Math.max(max, Number(item.chapter || 0)), Number(state.params.currentMainlineChapter || 0));
+  const selectedHardMax = state.hardlines.reduce((max, item) => Math.max(max, estimatedChapterFromStageId(item.stageId, stats) || 0), 0);
+  return Math.max(stats.latestChapter + ESTIMATE_FUTURE_CHAPTER_BUFFER, mainlineMax, selectedHardMax);
+}
+
+function estimatedBossOptionForChapter(chapter, stats = buildChapterStageStats()) {
+  const knownId = findLastStageIdForChapter(chapter, state.nikkeData.hardProgressOptions);
+  if (knownId) {
+    return {
+      id: knownId,
+      label: findStageLabelById(state.nikkeData.hardProgressOptions, knownId),
+      estimated: false,
+    };
+  }
+
+  if (!stats.latestChapter || chapter <= stats.latestChapter) return null;
+  const offset = chapter - stats.latestChapter;
+  return {
+    id: String(stats.latestStageId + offset * stats.estimatedStagesPerChapter),
+    label: `${chapter}-${stats.estimatedStagesPerChapter} BOSS（估算）`,
+    estimated: true,
+  };
+}
+
+function progressOptionsWithEstimatedFuture() {
+  const stats = buildChapterStageStats();
+  const options = [...(state.nikkeData.hardProgressOptions || [])];
+  const maxChapter = maxProjectedChapter(stats);
+  for (let chapter = stats.latestChapter + 1; chapter <= maxChapter; chapter += 1) {
+    const option = estimatedBossOptionForChapter(chapter, stats);
+    if (option) options.push(option);
+  }
+  return options;
+}
+
+function mainlineEstimateTip() {
+  const stats = buildChapterStageStats();
+  if (!stats.recent.length) return "暂无章节统计数据";
+  const start = stats.recent[0].chapter;
+  const end = stats.recent.at(-1).chapter;
+  return `已统计 ${start}-${end} 章平均 ${stats.average.toFixed(1)} 关，后续按 ${stats.estimatedStagesPerChapter} 关/章估算`;
+}
+
 function computeOutpostLevel(normalStageId, hardStageId) {
   const normalOptions = state.nikkeData.normalProgressOptions || [];
   const hardOptions = state.nikkeData.hardProgressOptions || [];
@@ -269,9 +444,51 @@ function computeOutpostLevel(normalStageId, hardStageId) {
   return Math.min(rawLevel, maxLevel);
 }
 
+function computeOutpostRate(normalStageId, hardStageId, fallbackRate = state.params.startHourlyRate) {
+  const baseLevel = computeOutpostLevel(normalStageId, hardStageId);
+  const rate = Number(state.nikkeData.outpostCoreDustMul?.[baseLevel]);
+  return {
+    baseLevel,
+    hourlyRate: Number.isFinite(rate) && rate > 0 ? rate : fallbackRate,
+  };
+}
+
+function hardBossProgressOptions() {
+  return progressOptionsWithEstimatedFuture().filter((option) => /\bBOSS\b/i.test(option.label));
+}
+
+function stageLabel(stageId, options = null) {
+  return findStageLabelById(options || progressOptionsWithEstimatedFuture(), stageId) || "-";
+}
+
+function chapterProgressOptions(options) {
+  const chapters = [];
+  const seen = new Set();
+  (options || []).forEach((option) => {
+    const chapter = chapterFromStageLabel(option.label);
+    if (chapter == null || seen.has(chapter)) return;
+    seen.add(chapter);
+    chapters.push({ id: String(chapter), label: `${chapter}章` });
+  });
+  return chapters.sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+function stageOptionsForChapter(chapter, options) {
+  const target = Number(chapter);
+  if (!target) return [];
+  return (options || []).filter((option) => chapterFromStageLabel(option.label) === target);
+}
+
+function nextHardBossStageId() {
+  const options = hardBossProgressOptions();
+  if (!options.length) return "";
+  const configuredMax = state.hardlines.reduce((max, item) => Math.max(max, Number(item.stageId || 0)), Number(state.params.currentHardStageId || 0));
+  return options.find((option) => Number(option.id) > configuredMax)?.id || options.at(-1)?.id || "";
+}
+
 function syncDerivedProgressData() {
   const normalOptions = state.nikkeData.normalProgressOptions || [];
-  const hardOptions = state.nikkeData.hardProgressOptions || [];
+  const hardOptions = progressOptionsWithEstimatedFuture();
   if (!normalOptions.length) return;
 
   if (!state.params.currentNormalStageId) {
@@ -288,6 +505,7 @@ function syncDerivedProgressData() {
   const baseLevel = computeOutpostLevel(state.params.currentNormalStageId, state.params.currentHardStageId);
   state.params.currentBaseLevel = baseLevel;
   state.params.startHourlyRate = state.nikkeData.outpostCoreDustMul[baseLevel] || state.params.startHourlyRate;
+  state.hardlines = state.hardlines.filter((item) => !item.stageId || findStageLabelById(hardOptions, item.stageId));
 }
 
 async function loadNikkeData() {
@@ -317,6 +535,12 @@ function normalizeFrequency(value) {
   if (text === "每月" || lowered === "monthly") return "每月";
   if (text === "一次性" || lowered === "once" || lowered === "one-time") return "一次性";
   return text;
+}
+
+function normalizeExtraResourceType(value) {
+  const text = String(value ?? "").trim();
+  if (text === "芯尘箱" || text.toLowerCase() === "box" || text.toLowerCase() === "boxes") return "芯尘箱";
+  return "芯尘";
 }
 
 function dayToDate(day) {
@@ -386,27 +610,60 @@ function buildPresetActivities() {
   const largeStep = 42;
   const smallStep = 28;
 
-  for (let day = 0; day <= totalDays; day += largeStep) {
-    results.push({
-      name: "21天大型活动",
-      mode: ACTIVITY_MODES.ONCE,
-      startDate: offsetDateString(startDate, day),
-      durationDays: 21,
-      boxes: 472,
-      locked: false,
+  const appendPresetActivity = (name, startDay, durationDays, paidHardTickets, phases) => {
+    const baseByOffset = new Map();
+    phases.forEach((phase) => {
+      const valuePerRun = phase.difficulty === "hard" ? 4 : 2;
+      const phaseStart = phase.startOffset;
+      if (phase.difficulty === "hard" && paidHardTickets > 0) {
+        const dayOneTickets = 5 + paidHardTickets;
+        const dayOneRewardRuns = Math.max(0, dayOneTickets - 11);
+        baseByOffset.set(phaseStart, (baseByOffset.get(phaseStart) || 0) + dayOneRewardRuns * valuePerRun);
+        for (let offset = phaseStart + 1; offset < phaseStart + 7; offset += 1) {
+          baseByOffset.set(offset, (baseByOffset.get(offset) || 0) + valuePerRun * 5);
+        }
+        return;
+      }
+
+      const rewards = [
+        [phaseStart, 0],
+        [phaseStart + 1, 0],
+        [phaseStart + 2, valuePerRun * 4],
+      ];
+      for (let offset = phaseStart + 3; offset < phaseStart + 7; offset += 1) {
+        rewards.push([offset, valuePerRun * 5]);
+      }
+      rewards.forEach(([offset, boxes]) => {
+        baseByOffset.set(offset, (baseByOffset.get(offset) || 0) + boxes);
+      });
     });
 
+    for (let offset = 0; offset < durationDays; offset += 1) {
+      const boxes = baseByOffset.get(offset) || 0;
+      results.push({
+        name,
+        mode: ACTIVITY_MODES.ONCE,
+        startDate: offsetDateString(startDate, startDay + offset),
+        durationDays: 1,
+        boxes,
+        locked: false,
+      });
+    }
+  };
+
+  for (let day = 0; day <= totalDays; day += largeStep) {
+    appendPresetActivity("21天大型活动", day, 21, 70, [
+      { startOffset: 0, difficulty: "normal" },
+      { startOffset: 7, difficulty: "normal" },
+      { startOffset: 14, difficulty: "hard" },
+    ]);
   }
 
   for (let day = 0; day <= totalDays; day += smallStep) {
-    results.push({
-      name: "14天小活动",
-      mode: ACTIVITY_MODES.ONCE,
-      startDate: offsetDateString(startDate, day),
-      durationDays: 14,
-      boxes: 324,
-      locked: false,
-    });
+    appendPresetActivity("14天小活动", day, 14, 45, [
+      { startOffset: 0, difficulty: "normal" },
+      { startOffset: 7, difficulty: "hard" },
+    ]);
   }
 
   return results;
@@ -424,13 +681,8 @@ function getCoreDustCostForNextLevel(currentLevel) {
   return range ? range.cost : 0;
 }
 
-function milestoneCount(level) {
-  if (level < FIXED_FIRST_BIG_LEVEL) return 0;
-  return Math.floor((level - FIXED_FIRST_BIG_LEVEL) / FIXED_BIG_INTERVAL) + 1;
-}
-
-function computeBaseHourlyRate(level, mainlineBonus) {
-  return state.params.startHourlyRate + mainlineBonus + milestoneCount(level) * state.params.bigRateBonus;
+function computeBaseHourlyRate(level, outpostHourlyRate = state.params.startHourlyRate) {
+  return outpostHourlyRate;
 }
 
 function normalizeLevelProgress(level, progress) {
@@ -477,48 +729,37 @@ function boxesNeededForTargetLevel(targetLevel, currentLevel, currentProgress, b
   return Math.ceil(neededDust / boxRate);
 }
 
-function nextMilestoneLevel(level) {
-  if (level < FIXED_FIRST_BIG_LEVEL) return FIXED_FIRST_BIG_LEVEL;
-  return FIXED_FIRST_BIG_LEVEL + (Math.floor((level - FIXED_FIRST_BIG_LEVEL) / FIXED_BIG_INTERVAL) + 1) * FIXED_BIG_INTERVAL;
+function activateNormalProgressFromMainlines(updates, currentNormalStageId) {
+  let activeNormalStageId = currentNormalStageId || "";
+  let activatedChapter = null;
+  updates.forEach((update) => {
+    const chapter = Number(update.chapter || 0);
+    if (!chapter) return;
+    const option = estimatedBossOptionForChapter(chapter);
+    if (!option) return;
+    if (Number(option.id || 0) > Number(activeNormalStageId || 0)) {
+      activeNormalStageId = option.id;
+      activatedChapter = chapter;
+    }
+  });
+  return { activeNormalStageId, activatedChapter };
 }
 
-function pendingGateInfo(pendingUpdates) {
-  const candidates = pendingUpdates
-    .filter((update) => update.gateLevel != null)
-    .sort((a, b) => Number(a.gateLevel) - Number(b.gateLevel));
-  if (!candidates.length) return { gateLevel: null, totalRateBonus: 0 };
-  const gateLevel = Number(candidates[0].gateLevel);
-  return {
-    gateLevel,
-    totalRateBonus: pendingUpdates
-      .filter((item) => item.gateLevel == null || Number(item.gateLevel) <= gateLevel)
-      .reduce((sum, item) => sum + Number(item.rateBonus || 0), 0),
-  };
-}
-
-function activateAvailableMainlines(pendingUpdates, level) {
-  let gainedBonus = 0;
+function activateAvailableHardlines(pendingUpdates, level, currentHardStageId) {
+  let activeHardStageId = currentHardStageId || "";
+  const activated = [];
   const remaining = [];
   pendingUpdates.forEach((update) => {
-    if (update.gateLevel == null || level >= Number(update.gateLevel)) {
-      gainedBonus += Number(update.rateBonus || 0);
+    if (update.gateLevel == null || level < Number(update.gateLevel)) {
+      remaining.push(update);
       return;
     }
-    remaining.push(update);
+    if (Number(update.stageId || 0) > Number(activeHardStageId || 0)) {
+      activeHardStageId = update.stageId;
+      activated.push(update);
+    }
   });
-  return { gainedBonus, remaining };
-}
-
-function shouldOpenGateByValue(currentDay, currentHourlyRate, boxesNeeded, pendingInfo) {
-  if (pendingInfo.gateLevel == null) return { shouldOpen: false, note: "当前没有有效门槛" };
-  if (boxesNeeded <= 0) return { shouldOpen: true, note: "无需开箱即可达到门槛" };
-  const remainingDays = Math.max(0, state.params.simulateDays - currentDay + 1);
-  const gain = remainingDays * dailyHours() * Math.max(0, pendingInfo.totalRateBonus);
-  const cost = boxesNeeded * Math.max(0, currentHourlyRate);
-  return {
-    shouldOpen: gain > cost,
-    note: `gain=${gain.toFixed(0)}, cost=${cost.toFixed(0)}, boxes=${boxesNeeded.toFixed(0)}, bonus=${pendingInfo.totalRateBonus.toFixed(2)}, horizon=${remainingDays}d`,
-  };
+  return { activeHardStageId, activated, remaining };
 }
 
 function openBoxes(progressDust, boxes, count, boxRate) {
@@ -532,8 +773,13 @@ function simulate(strategy) {
   let level = state.params.startLevel;
   let progressDust = state.params.startProgress;
   let boxes = state.params.startBoxes;
-  let mainlineBonus = 0;
+  let activeNormalStageId = state.params.currentNormalStageId || "";
+  let activeHardStageId = state.params.currentHardStageId || "";
+  let outpostInfo = computeOutpostRate(activeNormalStageId, activeHardStageId);
+  let outpostBaseLevel = outpostInfo.baseLevel;
+  let outpostHourlyRate = outpostInfo.hourlyRate;
 
+  syncMainlineChaptersByDate();
   const mainlineByDay = new Map();
   state.mainlines.forEach((update) => {
     const day = dateToDay(update.date);
@@ -543,8 +789,12 @@ function simulate(strategy) {
   });
 
   const activeExtras = state.extras;
-  let pendingMainlines = [];
+  let pendingHardlines = state.hardlines
+    .filter((update) => update.stageId && update.gateLevel != null)
+    .map((update) => ({ ...update, gateLevel: Number(update.gateLevel), stageId: String(update.stageId) }))
+    .sort((a, b) => a.gateLevel - b.gateLevel || Number(a.stageId) - Number(b.stageId));
   let releasedUpdatesCount = 0;
+  let hardUpdatesSeen = 0;
 
   ({ level, progress: progressDust } = normalizeLevelProgress(level, progressDust));
 
@@ -552,101 +802,113 @@ function simulate(strategy) {
     let strategyNote = "";
     let openedBoxesToday = 0;
     let dustFromBoxesToday = 0;
+    const appendStrategyNote = (text) => {
+      if (!text) return;
+      strategyNote = `${strategyNote} | ${text}`.replace(/^ \| /, "").trim();
+    };
+    const activateHardlinesForCurrentLevel = () => {
+      const activation = activateAvailableHardlines(pendingHardlines, level, activeHardStageId);
+      pendingHardlines = activation.remaining;
+      if (!activation.activated.length) return false;
+      activeHardStageId = activation.activeHardStageId;
+      hardUpdatesSeen += activation.activated.length;
+      outpostInfo = computeOutpostRate(activeNormalStageId, activeHardStageId, outpostHourlyRate);
+      outpostBaseLevel = outpostInfo.baseLevel;
+      outpostHourlyRate = outpostInfo.hourlyRate;
+      appendStrategyNote(`困难进度更新到 ${stageLabel(activeHardStageId)}，基地 ${outpostBaseLevel}`);
+      return true;
+    };
+    const nextDynamicOpenTargetLevel = () => {
+      const nextHardGate = pendingHardlines
+        .map((update) => Number(update.gateLevel))
+        .filter((gateLevel) => Number.isFinite(gateLevel) && gateLevel > level)
+        .sort((a, b) => a - b)[0];
+      return nextHardGate ?? Infinity;
+    };
+    const openBoxesWithDynamicRate = (requestedBoxes) => {
+      let remaining = Math.min(Math.max(0, Number(requestedBoxes || 0)), boxes);
+      let actual = 0;
+      let gainedDust = 0;
+
+      while (remaining > 0 && boxes > 0) {
+        activateHardlinesForCurrentLevel();
+        const dynamicHourlyRate = computeBaseHourlyRate(level, outpostHourlyRate);
+        const boxRate = Math.max(0, dynamicHourlyRate);
+        let chunk = remaining;
+
+        if (boxRate > 0) {
+          const targetLevel = nextDynamicOpenTargetLevel();
+          const neededDust = Number.isFinite(targetLevel)
+            ? dustNeededForTargetLevel(targetLevel, level, progressDust)
+            : 0;
+          if (neededDust > 0) chunk = Math.min(chunk, Math.ceil(neededDust / boxRate));
+        }
+
+        const result = openBoxes(progressDust, boxes, chunk, boxRate);
+        progressDust = result.progressDust;
+        boxes = result.boxes;
+        actual += result.actual;
+        gainedDust += result.gainedDust;
+        remaining -= result.actual;
+        ({ level, progress: progressDust } = normalizeLevelProgress(level, progressDust));
+        if (result.actual <= 0) break;
+      }
+
+      return { actual, gainedDust };
+    };
 
     const activityBoxes = effectiveEvents().reduce((sum, event) => {
       return sum + (isActivityTriggered(event, day) ? Number(event.boxes || 0) : 0);
     }, 0);
-    boxes += activityBoxes;
+    const triggeredExtras = activeExtras.filter((extra) => isExtraTriggered(extra, day));
+    const extraDust = triggeredExtras.reduce((sum, extra) => {
+      return normalizeExtraResourceType(extra.resourceType) === "芯尘" ? sum + Number(extra.amount || 0) : sum;
+    }, 0);
+    const extraBoxes = triggeredExtras.reduce((sum, extra) => {
+      return normalizeExtraResourceType(extra.resourceType) === "芯尘箱" ? sum + Number(extra.amount || 0) : sum;
+    }, 0);
+    boxes += activityBoxes + extraBoxes;
 
     const releasedToday = mainlineByDay.get(day) || [];
-    pendingMainlines = pendingMainlines.concat(releasedToday);
     releasedUpdatesCount += releasedToday.length;
 
-    const preDayActivation = activateAvailableMainlines(pendingMainlines, level);
-    if (preDayActivation.gainedBonus > 0) mainlineBonus += preDayActivation.gainedBonus;
-    pendingMainlines = preDayActivation.remaining;
+    const preNormalActivation = activateNormalProgressFromMainlines(releasedToday, activeNormalStageId);
+    if (preNormalActivation.activatedChapter != null) {
+      activeNormalStageId = preNormalActivation.activeNormalStageId;
+      outpostInfo = computeOutpostRate(activeNormalStageId, activeHardStageId, outpostHourlyRate);
+      outpostBaseLevel = outpostInfo.baseLevel;
+      outpostHourlyRate = outpostInfo.hourlyRate;
+      appendStrategyNote(`普通主线更新到 ${stageLabel(activeNormalStageId)}，基地 ${outpostBaseLevel}`);
+    }
 
-    let pendingInfo = pendingGateInfo(pendingMainlines);
-    let activeGateLevel = pendingInfo.gateLevel;
-    let hourlyRate = computeBaseHourlyRate(level, mainlineBonus);
-    const currentBoxRate = hourlyRate;
-    const isGateDay = (mainlineByDay.get(day) || []).some((update) => update.gateLevel != null);
+    activateHardlinesForCurrentLevel();
 
-    if (strategy.type === "OPEN_ALL_NOW" && day === 0 && boxes > 0) {
-      const result = openBoxes(progressDust, boxes, boxes, currentBoxRate);
-      progressDust = result.progressDust;
-      boxes = result.boxes;
+    let hourlyRate = computeBaseHourlyRate(level, outpostHourlyRate);
+
+    if (strategy.type === "获得即开" && boxes > 0) {
+      const result = openBoxesWithDynamicRate(boxes);
       openedBoxesToday += result.actual;
       dustFromBoxesToday += result.gainedDust;
-      strategyNote = "首日全开";
-    } else if (strategy.type === "CUSTOM_GATE" && strategy.targetDay === day && strategy.targetLevel) {
-      const needBoxes = boxesNeededForTargetLevel(strategy.targetLevel, level, progressDust, currentBoxRate);
-      if (needBoxes > 0 && needBoxes <= boxes) {
-        const result = openBoxes(progressDust, boxes, needBoxes, currentBoxRate);
-        progressDust = result.progressDust;
-        boxes = result.boxes;
-        openedBoxesToday += result.actual;
-        dustFromBoxesToday += result.gainedDust;
-        strategyNote = `精准补到 ${strategy.targetLevel}`;
-      }
-    } else if (strategy.type === "SMART_GATE" && isGateDay && activeGateLevel) {
-      const needBoxes = boxesNeededForTargetLevel(activeGateLevel, level, progressDust, currentBoxRate);
-      if (needBoxes > 0 && needBoxes <= boxes) {
-        const result = openBoxes(progressDust, boxes, needBoxes, currentBoxRate);
-        progressDust = result.progressDust;
-        boxes = result.boxes;
-        openedBoxesToday += result.actual;
-        dustFromBoxesToday += result.gainedDust;
-        strategyNote = `主线日补到门槛 ${activeGateLevel}`;
-      }
-    } else if (strategy.type === "SMART_VALUE_GATE" && isGateDay && activeGateLevel) {
-      const needBoxes = boxesNeededForTargetLevel(activeGateLevel, level, progressDust, currentBoxRate);
-      if (needBoxes > 0 && needBoxes <= boxes) {
-        const judge = shouldOpenGateByValue(day, hourlyRate, needBoxes, pendingInfo);
-        strategyNote = judge.note;
-        if (judge.shouldOpen) {
-          const result = openBoxes(progressDust, boxes, needBoxes, currentBoxRate);
-          progressDust = result.progressDust;
-          boxes = result.boxes;
-          openedBoxesToday += result.actual;
-          dustFromBoxesToday += result.gainedDust;
-          strategyNote = `价值判断通过，补到门槛 ${activeGateLevel}; ${judge.note}`;
-        }
-      }
-    } else if (strategy.type === "OPEN_EVERY_MILESTONE") {
-      const milestoneLevel = nextMilestoneLevel(level);
-      const needBoxes = boxesNeededForTargetLevel(milestoneLevel, level, progressDust, currentBoxRate);
-      if (needBoxes > 0 && needBoxes <= boxes) {
-        const result = openBoxes(progressDust, boxes, needBoxes, currentBoxRate);
-        progressDust = result.progressDust;
-        boxes = result.boxes;
-        openedBoxesToday += result.actual;
-        dustFromBoxesToday += result.gainedDust;
-        strategyNote = `补到大档 ${milestoneLevel}`;
-      }
-    } else if (strategy.type === "NO_BOX" && day === state.params.simulateDays && boxes > 0) {
-      const result = openBoxes(progressDust, boxes, boxes, currentBoxRate);
-      progressDust = result.progressDust;
-      boxes = result.boxes;
+      appendStrategyNote(`获得即开 ${result.actual.toFixed(0)} 箱`);
+    } else if (strategy.type === "主线后开" && (releasedToday.length || day === state.params.simulateDays) && boxes > 0) {
+      const result = openBoxesWithDynamicRate(boxes);
       openedBoxesToday += result.actual;
       dustFromBoxesToday += result.gainedDust;
-      strategyNote = "最后一天全开";
+      appendStrategyNote(`${releasedToday.length ? "主线后开" : "最后补开"} ${result.actual.toFixed(0)} 箱`);
+    } else if (strategy.type === "最后一天全开" && day === state.params.simulateDays && boxes > 0) {
+      const result = openBoxesWithDynamicRate(boxes);
+      openedBoxesToday += result.actual;
+      dustFromBoxesToday += result.gainedDust;
+      appendStrategyNote(`最后一天全开 ${result.actual.toFixed(0)} 箱`);
     }
 
     ({ level, progress: progressDust } = normalizeLevelProgress(level, progressDust));
-    const postBoxActivation = activateAvailableMainlines(pendingMainlines, level);
-    if (postBoxActivation.gainedBonus > 0) {
-      mainlineBonus += postBoxActivation.gainedBonus;
-      strategyNote = `${strategyNote} | 解锁章节加成 +${postBoxActivation.gainedBonus.toFixed(2)}`.replace(/^ \| /, "").trim();
-    }
-    pendingMainlines = postBoxActivation.remaining;
-    pendingInfo = pendingGateInfo(pendingMainlines);
-    activeGateLevel = pendingInfo.gateLevel;
 
-    hourlyRate = computeBaseHourlyRate(level, mainlineBonus);
+    activateHardlinesForCurrentLevel();
+
+    hourlyRate = computeBaseHourlyRate(level, outpostHourlyRate);
 
     const dailyDust = hourlyRate * dailyHours();
-    const extraDust = activeExtras.reduce((sum, extra) => sum + (isExtraTriggered(extra, day) ? Number(extra.amount || 0) : 0), 0);
     progressDust += dailyDust + extraDust;
     ({ level, progress: progressDust } = normalizeLevelProgress(level, progressDust));
 
@@ -663,10 +925,15 @@ function simulate(strategy) {
       dustFromBoxesToday,
       dailyDust,
       extraDust,
+      extraBoxes,
       activityBoxes,
-      mainlineBonus,
-      activeGateLevel,
+      normalStageId: activeNormalStageId,
+      normalProgressLabel: stageLabel(activeNormalStageId),
+      hardStageId: activeHardStageId,
+      hardProgressLabel: stageLabel(activeHardStageId),
+      outpostBaseLevel,
       updatesSeen: releasedUpdatesCount,
+      hardUpdatesSeen,
       strategyNote,
     });
   }
@@ -684,7 +951,6 @@ function buildSummaries() {
         strategyType: strategy?.type ?? "",
         finalDisplayLevel: last.displayLevel,
         finalBoxes: last.boxes,
-        activeGateLevel: last.activeGateLevel,
         totalOpenedBoxes: rows.reduce((sum, row) => sum + row.openedBoxesToday, 0),
       };
     })
@@ -709,7 +975,6 @@ function refreshParamDerivedOutputs(host = document.getElementById("params-form"
   const outputs = {
     currentBaseLevel: String(state.params.currentBaseLevel),
     startHourlyRate: state.params.startHourlyRate.toFixed(2),
-    currentMainlineChapter: String(state.params.currentMainlineChapter),
     nikkeDataSource: `${state.nikkeData.sourceLabel} / Chapters ${state.nikkeData.chaptersVersion || "-"} / Outpost ${state.nikkeData.outpostVersion || "-"}`,
     dailyHours: dailyHours().toFixed(1),
     nextCost: String(getCoreDustCostForNextLevel(state.params.startLevel)),
@@ -735,6 +1000,7 @@ function renderParams() {
     input.addEventListener("input", (event) => {
       const raw = event.target.value || 0;
       state.params[key] = kind === "date" ? String(raw) : kind === "int" ? Math.trunc(Number(raw || 0)) : Number(raw || 0);
+      persistEditableState();
       refreshParamDerivedOutputs(host);
       if (key === "startDate") renderMainlineTimeline();
     });
@@ -763,11 +1029,83 @@ function renderParams() {
     select.addEventListener("change", (event) => {
       state.params[key] = event.target.value;
       syncDerivedProgressData();
+      persistEditableState();
       refreshParamDerivedOutputs(host);
       renderMainlineTimeline();
     });
     field.appendChild(select);
     host.appendChild(field);
+  };
+
+  const addHardProgressInputs = () => {
+    const hardOptions = state.nikkeData.hardProgressOptions || [];
+    const currentLabel = findStageLabelById(hardOptions, state.params.currentHardStageId);
+    const currentChapter = chapterFromStageLabel(currentLabel);
+    const selectedChapter = currentChapter == null ? "" : String(currentChapter);
+
+    const chapterField = document.createElement("label");
+    chapterField.className = "field";
+    chapterField.innerHTML = "<span>当前困难章节</span>";
+    const chapterSelect = document.createElement("select");
+    const emptyChapter = document.createElement("option");
+    emptyChapter.value = "";
+    emptyChapter.textContent = "未选择";
+    chapterSelect.appendChild(emptyChapter);
+    chapterProgressOptions(hardOptions).forEach((option) => {
+      const el = document.createElement("option");
+      el.value = option.id;
+      el.textContent = option.label;
+      if (option.id === selectedChapter) el.selected = true;
+      chapterSelect.appendChild(el);
+    });
+    chapterField.appendChild(chapterSelect);
+    host.appendChild(chapterField);
+
+    const stageField = document.createElement("label");
+    stageField.className = "field";
+    stageField.innerHTML = "<span>当前困难关卡</span>";
+    const stageSelect = document.createElement("select");
+
+    const fillStageSelect = (chapter, value = state.params.currentHardStageId) => {
+      stageSelect.innerHTML = "";
+      const emptyStage = document.createElement("option");
+      emptyStage.value = "";
+      emptyStage.textContent = chapter ? "请选择关卡" : "请先选择章节";
+      stageSelect.appendChild(emptyStage);
+      const stageOptions = stageOptionsForChapter(chapter, hardOptions);
+      stageOptions.forEach((option) => {
+        const el = document.createElement("option");
+        el.value = option.id;
+        el.textContent = option.label;
+        if (String(option.id) === String(value || "")) el.selected = true;
+        stageSelect.appendChild(el);
+      });
+      stageSelect.disabled = !stageOptions.length;
+    };
+
+    fillStageSelect(selectedChapter);
+
+    chapterSelect.addEventListener("change", (event) => {
+      const chapter = event.target.value;
+      const stageOptions = stageOptionsForChapter(chapter, hardOptions);
+      state.params.currentHardStageId = stageOptions[0]?.id || "";
+      fillStageSelect(chapter, state.params.currentHardStageId);
+      syncDerivedProgressData();
+      persistEditableState();
+      refreshParamDerivedOutputs(host);
+      renderMainlineTimeline();
+    });
+
+    stageSelect.addEventListener("change", (event) => {
+      state.params.currentHardStageId = event.target.value;
+      syncDerivedProgressData();
+      persistEditableState();
+      refreshParamDerivedOutputs(host);
+      renderMainlineTimeline();
+    });
+
+    stageField.appendChild(stageSelect);
+    host.appendChild(stageField);
   };
 
   const addReadonlyInput = (label, outputKey, value) => {
@@ -788,17 +1126,14 @@ function renderParams() {
 
   if (state.nikkeData.normalProgressOptions.length) {
     addSelectInput("当前普通主线进度", "currentNormalStageId", state.nikkeData.normalProgressOptions);
-    addSelectInput("当前困难主线进度", "currentHardStageId", state.nikkeData.hardProgressOptions, true);
+    addHardProgressInputs();
     addReadonlyInput("当前基地等级", "currentBaseLevel", String(state.params.currentBaseLevel));
     addReadonlyInput("当前小时芯尘", "startHourlyRate", state.params.startHourlyRate.toFixed(2));
-    addReadonlyInput("当前主线章节", "currentMainlineChapter", String(state.params.currentMainlineChapter));
     addReadonlyInput("NIKKE数据", "nikkeDataSource", `${state.nikkeData.sourceLabel} / Chapters ${state.nikkeData.chaptersVersion || "-"} / Outpost ${state.nikkeData.outpostVersion || "-"}`);
   } else {
     addEditableInput("当前小时芯尘", "startHourlyRate", "float");
-    addEditableInput("当前主线章节", "currentMainlineChapter", "int");
   }
 
-  addEditableInput("开始日期", "startDate", "date");
   addEditableInput("模拟天数", "simulateDays", "int");
   addEditableInput("购买扫荡次数", "paidSweeps", "int");
   addReadonlyInput("自动计算的每日小时数", "dailyHours", dailyHours().toFixed(1));
@@ -832,6 +1167,7 @@ function createField(label, value, onChange, options = {}) {
     input.addEventListener("change", (event) => {
       text.textContent = event.target.checked ? "已启用" : "未启用";
       onChange(event.target.checked);
+      persistEditableState();
     });
     row.appendChild(input);
     row.appendChild(text);
@@ -842,11 +1178,13 @@ function createField(label, value, onChange, options = {}) {
   const input = options.type === "select" ? document.createElement("select") : document.createElement("input");
   input.className = `field-control ${options.columnClass || ""}`.trim();
   if (options.type === "select") {
-    options.options.forEach((option) => {
+    (options.options || []).forEach((option) => {
+      const optionValue = typeof option === "object" ? option.id ?? option.value : option;
+      const optionLabel = typeof option === "object" ? option.label ?? optionValue : option;
       const el = document.createElement("option");
-      el.value = option;
-      el.textContent = option;
-      if (String(option) === String(value ?? "")) el.selected = true;
+      el.value = optionValue;
+      el.textContent = optionLabel;
+      if (String(optionValue) === String(value ?? "")) el.selected = true;
       input.appendChild(el);
     });
   } else {
@@ -860,6 +1198,7 @@ function createField(label, value, onChange, options = {}) {
     if (options.cast === "number") onChange(Number(raw || 0));
     else if (options.cast === "optionalInt") onChange(parseOptionalInt(raw));
     else onChange(raw);
+    persistEditableState();
   });
   wrap.appendChild(input);
   return wrap;
@@ -892,6 +1231,7 @@ function createCompactField(value, onChange, options = {}) {
     if (options.cast === "number") onChange(Number(raw || 0));
     else if (options.cast === "optionalInt") onChange(parseOptionalInt(raw));
     else onChange(raw);
+    persistEditableState();
   });
 
   return input;
@@ -935,7 +1275,10 @@ function renderGenericRows(listId, rows, schema, onDelete, options = {}) {
       del.className = "icon-btn";
       del.type = "button";
       del.textContent = "x";
-      del.addEventListener("click", () => onDelete(index));
+      del.addEventListener("click", () => {
+        onDelete(index);
+        persistEditableState();
+      });
       grid.appendChild(del);
     }
     card.appendChild(grid);
@@ -1015,14 +1358,6 @@ function renderMainlineModal() {
           <span class="field-label">更新时间</span>
           <input id="mainline-modal-date" class="field-control" type="date" value="${current.date}">
         </label>
-        <label class="field col-number col-inline-half">
-          <span class="field-label">小时加成</span>
-          <input id="mainline-modal-rate" class="field-control" type="number" step="0.1" value="${current.rateBonus}">
-        </label>
-        <label class="field col-number col-inline-half">
-          <span class="field-label">解锁等级</span>
-          <input id="mainline-modal-gate" class="field-control" type="text" value="${current.gateLevel ?? ""}">
-        </label>
       </div>
       <div class="mainline-modal-actions">
         <button class="ghost-btn danger-btn" type="button" id="mainline-modal-delete">删除节点</button>
@@ -1038,6 +1373,7 @@ function renderMainlineModal() {
     el.addEventListener(eventName, () => {
       setter(el.value);
       if (afterChange) afterChange(el.value);
+      persistEditableState();
       if (rerender) renderMainlineTimeline();
     });
   };
@@ -1045,13 +1381,6 @@ function renderMainlineModal() {
   bindValue("mainline-modal-date", (value) => {
     current.date = value || current.date;
   }, { eventName: "change", rerender: true });
-  bindValue("mainline-modal-rate", (value) => {
-    current.rateBonus = Number(value || 0);
-  }, { eventName: "change", rerender: true });
-  bindValue("mainline-modal-gate", (value) => {
-    current.gateLevel = parseOptionalInt(value);
-  }, { eventName: "change", rerender: true });
-
   mainlineModalRoot.querySelectorAll('[data-close="modal"]').forEach((node) => {
     node.addEventListener("click", closeMainlineModal);
   });
@@ -1062,6 +1391,7 @@ function renderMainlineModal() {
   document.getElementById("mainline-modal-delete")?.addEventListener("click", () => {
     state.mainlines.splice(state.mainlineEditorIndex, 1);
     if (state.mainlineEditorIndex >= state.mainlines.length) state.mainlineEditorIndex = state.mainlines.length - 1;
+    persistEditableState();
     renderMainlineTimeline();
     closeMainlineModal();
   });
@@ -1070,12 +1400,13 @@ function renderMainlineModal() {
 function renderMainlineTimeline() {
   ensureMainlineEditorIndex();
   const entries = sortedMainlineEntries();
+  const estimateTip = mainlineEstimateTip();
 
   if (!entries.length) {
     mainlineTimelineChart.setOption({
       title: {
         text: "暂无主线节点",
-        subtext: "双击时间轴空白处新增主线节点",
+        subtext: `双击时间轴空白处新增主线节点\n${estimateTip}`,
         left: "center",
         top: "middle",
         textStyle: { fontSize: 18, fontWeight: 600, color: "#6b778c" },
@@ -1119,20 +1450,28 @@ function renderMainlineTimeline() {
   mainlineTimelineChart.setOption({
     animation: true,
     title: {
-      text: `主线更新时间线（起始日 ${state.params.startDate}）`,
-      subtext: "双击空白处新增节点，单击节点编辑，拖动节点修改日期",
+      text: "主线更新时间线",
+      subtext: `双击空白处新增节点，单击节点编辑，拖动节点修改日期\n${estimateTip}`,
       left: "center",
       top: 8,
       textStyle: { fontSize: 18, fontWeight: 700, color: "#1f2937" },
       subtextStyle: { fontSize: 12, color: "#7a879b", padding: [8, 0, 0, 0] },
     },
-    grid: { left: 24, right: 24, top: 56, bottom: 36 },
+    grid: { left: 24, right: 24, top: 74, bottom: 36 },
     tooltip: {
       trigger: "item",
       formatter: (params) => {
         const item = entries.find((entry) => entry.index === params.data.originalIndex);
         if (!item) return "";
-        return `${item.label}<br>${item.date}<br>小时加成：${item.rateBonus}<br>解锁等级：${item.gateLevel ?? "-"}`;
+        const progressOption = estimatedBossOptionForChapter(item.chapter);
+        const baseLevel = progressOption ? computeOutpostLevel(progressOption.id, state.params.currentHardStageId) : "-";
+        return [
+          item.label,
+          item.date,
+          `普通进度：${progressOption?.label || "-"}`,
+          `预计基地等级：${baseLevel}`,
+          estimateTip,
+        ].join("<br>");
       },
     },
     xAxis: {
@@ -1200,6 +1539,7 @@ function renderMainlineTimeline() {
         if (state.mainlineModalOpen) renderMainlineModal();
       },
       ondragend: () => {
+        persistEditableState();
         renderMainlineTimeline();
       },
     };
@@ -1223,10 +1563,9 @@ function renderMainlineTimeline() {
     if (!Array.isArray(next) || !next[0]) return;
     state.mainlines.push({
       date: formatDateInput(new Date(next[0])),
-      rateBonus: 2,
-      gateLevel: null,
     });
     state.mainlineEditorIndex = state.mainlines.length - 1;
+    persistEditableState();
     setMainlinePopupPosition(window.scrollX + rect.left + offsetX + 14, window.scrollY + rect.top + offsetY - 24);
     state.mainlineModalOpen = true;
     renderMainlineTimeline();
@@ -1237,10 +1576,30 @@ function renderMainlineTimeline() {
   renderMainlineModal();
 }
 
+function renderHardlinesEditor() {
+  const host = document.getElementById("hardlines-list");
+  if (!host) return;
+  const bossOptions = hardBossProgressOptions();
+  renderGenericRows("hardlines-list", state.hardlines, [
+    { key: "gateLevel", label: "到达等级", type: "number", cast: "optionalInt", step: "1", columnClass: "col-day" },
+    { key: "stageId", label: "困难BOSS进度", type: "select", options: bossOptions, columnClass: "col-hard-progress" },
+  ], (index) => {
+    state.hardlines.splice(index, 1);
+    renderEditors();
+  }, { gridClass: "hardlines-grid" });
+  if (!bossOptions.length) {
+    host.innerHTML = "";
+    const note = document.createElement("div");
+    note.className = "events-preset-note";
+    note.textContent = "暂无困难进度数据，加载 NIKKE 数据后可选择每章 BOSS。";
+    host.appendChild(note);
+  }
+}
+
 function renderTimelineRows(listId, rows, rowType, onDelete) {
   const host = document.getElementById(listId);
   host.innerHTML = "";
-  renderListHeader(host, "timeline-grid", rowType === "mainline" ? ["更新时间", "小时加成", "解锁等级"] : ["开始日期", "持续天数", "获得箱子"]);
+  renderListHeader(host, "timeline-grid", rowType === "mainline" ? ["更新时间"] : ["开始日期", "持续天数", "获得箱子"]);
   rows.forEach((row, index) => {
     const card = document.createElement("div");
     card.className = `timeline-card ${rowType}`;
@@ -1249,8 +1608,6 @@ function renderTimelineRows(listId, rows, rowType, onDelete) {
     compactGrid.className = "timeline-grid";
     if (rowType === "mainline") {
       compactGrid.appendChild(createCompactField(row.date, (value) => { row.date = value; }, { type: "date", ariaLabel: "主线更新时间", title: "主线更新时间", compactClass: "is-date", columnClass: "col-date" }));
-      compactGrid.appendChild(createCompactField(row.rateBonus, (value) => { row.rateBonus = value; }, { type: "number", cast: "number", step: "0.1", placeholder: "加成", ariaLabel: "小时加成", title: "小时加成", compactClass: "is-short", columnClass: "col-number" }));
-      compactGrid.appendChild(createCompactField(row.gateLevel, (value) => { row.gateLevel = value; }, { type: "text", cast: "optionalInt", placeholder: "解锁等级", ariaLabel: "解锁等级", title: "解锁等级", compactClass: "is-short", columnClass: "col-gate" }));
     } else {
       compactGrid.appendChild(createCompactField(row.startDate, (value) => { row.startDate = value; }, { type: "date", ariaLabel: "活动开始日期", title: "活动开始日期", compactClass: "is-date", columnClass: "col-date" }));
       compactGrid.appendChild(createCompactField(row.durationDays, (value) => { row.durationDays = value; }, { type: "number", cast: "number", step: "1", placeholder: "天数", ariaLabel: "活动持续天数", title: "活动持续天数", compactClass: "is-short", columnClass: "col-number" }));
@@ -1263,7 +1620,10 @@ function renderTimelineRows(listId, rows, rowType, onDelete) {
       compactDel.className = "icon-btn";
       compactDel.type = "button";
       compactDel.textContent = "x";
-      compactDel.addEventListener("click", () => onDelete(index));
+      compactDel.addEventListener("click", () => {
+        onDelete(index);
+        persistEditableState();
+      });
       card.appendChild(compactDel);
     }
 
@@ -1295,7 +1655,7 @@ function renderEventsEditor() {
   if (state.activityConfig.mode === ACTIVITY_EDITOR_MODES.PRESET) {
     const note = document.createElement("div");
     note.className = "events-preset-note";
-    note.textContent = "预设节奏：每 42 天约 1 个 21 天大型活动（约获得 472 小时芯尘箱），每 28 天约 1 个 14 天小活动（约获得 324 小时芯尘箱）；折算为每 42 天约 1 个大型活动 + 1.5 个小活动。";
+    note.textContent = "预设：小活动约 324 箱，大活动约 472 箱。每日 5 门票推进；11 关产箱，normal 每次 2 箱、hard 每次 4 箱。hard 首日买票从 1 关推完，剩余门票扫荡 11 关。";
     host.appendChild(controls);
     host.appendChild(note);
     return;
@@ -1307,6 +1667,7 @@ function renderEventsEditor() {
   addSmallBtn.textContent = "新增14天小活动";
   addSmallBtn.addEventListener("click", () => {
     state.events.push({ name: "14天小活动", startDate: state.params.startDate, durationDays: 14, boxes: 324, locked: false });
+    persistEditableState();
     renderEventsEditor();
   });
   controls.appendChild(addSmallBtn);
@@ -1317,6 +1678,7 @@ function renderEventsEditor() {
   addLargeBtn.textContent = "新增21天大型活动";
   addLargeBtn.addEventListener("click", () => {
     state.events.push({ name: "21天大型活动", startDate: state.params.startDate, durationDays: 21, boxes: 472, locked: false });
+    persistEditableState();
     renderEventsEditor();
   });
   controls.appendChild(addLargeBtn);
@@ -1340,13 +1702,15 @@ function renderEventsEditor() {
 
 function renderEditors() {
   renderMainlineTimeline();
+  renderHardlinesEditor();
   renderEventsEditor();
 
   renderGenericRows("extras-list", state.extras, [
     { key: "name", label: "名称", type: "text", columnClass: "col-name" },
     { key: "startDate", label: "开始日期", type: "date", columnClass: "col-date" },
     { key: "frequency", label: "类型", type: "select", options: EXTRA_FREQUENCIES, columnClass: "col-frequency" },
-    { key: "amount", label: "芯尘箱", type: "number", cast: "number", step: "0.1", columnClass: "col-amount" },
+    { key: "resourceType", label: "获取类型", type: "select", options: EXTRA_RESOURCE_TYPES, columnClass: "col-frequency" },
+    { key: "amount", label: "数量", type: "number", cast: "number", step: "0.1", columnClass: "col-amount" },
     { key: "note", label: "备注", type: "text", columnClass: "col-note" },
   ], (index) => {
     state.extras.splice(index, 1);
@@ -1356,8 +1720,6 @@ function renderEditors() {
   renderGenericRows("strategies-list", state.strategies, [
     { key: "name", label: "名称", type: "text", hideLabel: true },
     { key: "type", label: "类型", type: "select", options: STRATEGY_TYPES, hideLabel: true },
-    { key: "targetDay", label: "目标天", type: "text", cast: "optionalInt", hideLabel: true },
-    { key: "targetLevel", label: "目标级", type: "text", cast: "optionalInt", hideLabel: true },
     { key: "note", label: "备注", type: "text", hideLabel: true },
   ], (index) => {
     state.strategies.splice(index, 1);
@@ -1461,10 +1823,10 @@ function renderSummaryTable() {
       <td>${row.finalDisplayLevel.toFixed(2)}</td>
       <td>${row.finalBoxes.toFixed(0)}</td>
       <td>${row.totalOpenedBoxes.toFixed(0)}</td>
-      <td>${row.activeGateLevel == null ? "-" : row.activeGateLevel}</td>
     `;
     tr.addEventListener("click", () => {
       state.detailStrategy = row.name;
+      persistEditableState();
       fillSelect(detailStrategySelect, activeStrategyNames(), state.detailStrategy, true);
       renderSummaryTable();
       renderDetailTable();
@@ -1487,10 +1849,13 @@ function renderDetailTable() {
       <td>${row.hourlyRate.toFixed(2)}</td>
       <td>${row.boxes.toFixed(0)}</td>
       <td>${row.openedBoxesToday.toFixed(0)}</td>
+      <td>${row.activityBoxes.toFixed(0)}</td>
       <td>${row.dailyDust.toFixed(0)}</td>
       <td>${row.extraDust.toFixed(0)}</td>
-      <td>${row.activeGateLevel == null ? "-" : row.activeGateLevel}</td>
-      <td>${row.strategyNote || ""}</td>
+      <td>${row.extraBoxes.toFixed(0)}</td>
+      <td>${row.hardProgressLabel || "-"}</td>
+      <td>${row.outpostBaseLevel ?? "-"}</td>
+      <td class="detail-note-cell">${row.strategyNote || ""}</td>
     `;
     body.appendChild(tr);
   });
@@ -1513,6 +1878,7 @@ function runSimulation() {
     state.summaries = buildSummaries();
     if (!state.detailStrategy || !state.summaries.some((item) => item.name === state.detailStrategy)) {
       state.detailStrategy = state.summaries[0]?.name || "";
+      persistEditableState();
     }
     fillSelect(detailStrategySelect, activeStrategyNames(), state.detailStrategy, true);
     renderMetrics();
@@ -1538,7 +1904,7 @@ function exportCurrentCSV() {
     return;
   }
   const data = [
-    ["day", "level", "progress_dust", "next_level_cost", "display_level", "hourly_rate", "boxes", "opened_boxes_today", "daily_dust", "extra_dust", "activity_boxes", "mainline_bonus", "active_gate_level", "updates_seen", "strategy_note"],
+    ["day", "level", "progress_dust", "next_level_cost", "display_level", "hourly_rate", "boxes", "opened_boxes_today", "daily_dust", "extra_dust", "extra_boxes", "activity_boxes", "normal_progress", "hard_progress", "outpost_base_level", "updates_seen", "hard_updates_seen", "strategy_note"],
     ...rows.map((row) => [
       row.day,
       row.level,
@@ -1550,10 +1916,13 @@ function exportCurrentCSV() {
       row.openedBoxesToday.toFixed(0),
       row.dailyDust.toFixed(2),
       row.extraDust.toFixed(2),
+      row.extraBoxes.toFixed(2),
       row.activityBoxes.toFixed(2),
-      row.mainlineBonus.toFixed(2),
-      row.activeGateLevel ?? "",
+      row.normalProgressLabel ?? "",
+      row.hardProgressLabel ?? "",
+      row.outpostBaseLevel ?? "",
       row.updatesSeen,
+      row.hardUpdatesSeen,
       row.strategyNote ?? "",
     ]),
   ];
@@ -1598,7 +1967,7 @@ function ensureEventToolbarButtons() {
 }
 
 function syncInlineSectionActions() {
-  ["section-mainlines", "section-events", "section-extras"].forEach((id) => {
+  ["section-mainlines", "section-hardlines", "section-events", "section-extras"].forEach((id) => {
     const section = document.getElementById(id);
     if (section) section.classList.add("has-inline-toolbar");
   });
@@ -1608,6 +1977,9 @@ function syncInlineSectionActions() {
 
   const extrasAdd = document.querySelector('[data-add="extras"]');
   if (extrasAdd) extrasAdd.textContent = "新增";
+
+  const hardlinesAdd = document.querySelector('[data-add="hardlines"]');
+  if (hardlinesAdd) hardlinesAdd.textContent = "新增";
 }
 
 function buildPageNav() {
@@ -1654,14 +2026,17 @@ function bindEvents() {
       const type = button.dataset.add;
       if (type === "event-small") state.events.push({ name: "14天小活动", mode: ACTIVITY_MODES.ONCE, startDate: state.params.startDate, durationDays: 14, boxes: 324, locked: false });
       if (type === "event-large") state.events.push({ name: "21天大型活动", mode: ACTIVITY_MODES.ONCE, startDate: state.params.startDate, durationDays: 21, boxes: 472, locked: false });
-      if (type === "extras") state.extras.push({ name: "新来源", startDate: state.params.startDate, startDay: 0, endDay: state.params.simulateDays, frequency: "每日", amount: 0, enabled: true, note: "" });
-      if (type === "strategies") state.strategies.push({ name: "新策略", type: "BASELINE", targetDay: null, targetLevel: null, enabled: true, note: "" });
+      if (type === "hardlines") state.hardlines.push({ gateLevel: state.params.startLevel, stageId: nextHardBossStageId(), locked: false });
+      if (type === "extras") state.extras.push({ name: "新来源", startDate: state.params.startDate, startDay: 0, endDay: state.params.simulateDays, frequency: "每日", resourceType: "芯尘", amount: 0, enabled: true, note: "" });
+      if (type === "strategies") state.strategies.push({ name: "新策略", type: "获得即开", enabled: true, note: "" });
+      persistEditableState();
       renderEditors();
     });
   });
 
   detailStrategySelect.addEventListener("change", (event) => {
     state.detailStrategy = event.target.value;
+    persistEditableState();
     renderSummaryTable();
     renderDetailTable();
   });
